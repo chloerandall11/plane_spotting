@@ -34,5 +34,21 @@
       "destination": ""
     },
     "outcome": "guessed"
+  },
+  {
+    "timestamp": 1787252334.460989,
+    "callsign": "RYR6970",
+    "category": "commercial",
+    "operator": "Ryanair",
+    "guess": null,
+    "outcome": "lost_sight"
+  },
+  {
+    "timestamp": 1787252398.998445,
+    "callsign": "RYR6970",
+    "category": "commercial",
+    "operator": "Ryanair",
+    "guess": null,
+    "outcome": "lost_sight"
   }
 ]
