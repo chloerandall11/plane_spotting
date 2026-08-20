@@ -30,11 +30,19 @@ compass_directions = [ "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
 
 # common commerical airline identifiers
 #TODO should load from a real airline designator table for full scope
-commercial_airline_dict = {"BAW": "British Airways", "RYR": "Ryanair", "EZY": "easyJet",
+commercial_airline_dict = {
+    "BAW": "British Airways", "RYR": "Ryanair", "EZY": "easyJet",
     "VIR": "Virgin Atlantic", "AFR": "Air France", "DLH": "Lufthansa",
     "UAE": "Emirates", "AAL": "American Airlines", "UAL": "United Airlines",
     "DAL": "Delta Air Lines", "KLM": "KLM", "QFA": "Qantas",
-    "JBU": "JetBlue", "WZZ": "Wizz Air", "TAP": "TAP Air Portugal",}
+    "JBU": "JetBlue", "WZZ": "Wizz Air", "TAP": "TAP Air Portugal",
+    "EIN": "Aer Lingus", "NOZ": "Norwegian", "TOM": "TUI Airways",
+    "EXS": "Jet2", "THY": "Turkish Airlines", "QTR": "Qatar Airways",
+    "IBE": "Iberia", "SAS": "SAS", "SWR": "Swiss", "AUA": "Austrian Airlines",
+    "FIN": "Finnair", "ITY": "ITA Airways", "LOT": "LOT Polish Airlines",
+    "ACA": "Air Canada", "CPA": "Cathay Pacific", "SIA": "Singapore Airlines",
+    "ANA": "All Nippon Airways", "JAL": "Japan Airlines", "ETD": "Etihad Airways",
+}
 
 # common military airline identifiers
 military_airline_dict = [
@@ -78,7 +86,7 @@ def haversine_equation(latA, lonA, latB, lonB):
     between two points on a sphere using their latitudes
     and longitudes
     """
-    r = const.R_earth.to("km").value
+    r = const.R_earth.to("km").value # type: ignore
     p1, p2 = math.radians(latA), math.radians(latB)
     dphi = math.radians(latB - latA)
     dlambda = math.radians(lonB - lonA)
@@ -120,7 +128,7 @@ def extrapolate_position(aircraft: Aircraft, seconds_elapsed: float):
         return aircraft.lat, aircraft.lon
     distance_m = aircraft.velocity_ms * seconds_elapsed
     heading_rad = math.radians(aircraft.heading_deg)
-    r = const.R_earth.value # units: m
+    r = const.R_earth.value # type: ignore # units: m
     lat1 = math.radians(aircraft.lat)
     lon1 = math.radians(aircraft.lon)
     lat2 = math.asin(

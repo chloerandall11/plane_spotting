@@ -50,5 +50,17 @@
     "operator": "Ryanair",
     "guess": null,
     "outcome": "lost_sight"
+  },
+  {
+    "timestamp": 1787253478.769382,
+    "callsign": "EXS76SP",
+    "category": "commercial",
+    "operator": "Jet2",
+    "guess": {
+      "airline": "jet2",
+      "origin": "leeds",
+      "destination": ""
+    },
+    "outcome": "guessed"
   }
 ]

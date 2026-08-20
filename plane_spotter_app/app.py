@@ -72,21 +72,24 @@ def save_history(entries):
 def candidate_public_view(c: "core.Candidate"):
     """What the client is allowed to see BEFORE revealing - no
     callsign/airline, just enough to go find it in the sky."""
+    altitude_m = c.aircraft.altitude_m
     return {
         "compass": c.compass,
+        "bearing_deg": round(c.bearing_deg),
         "distance_km": round(c.distance_km, 1),
-        "altitude_ft": round(c.aircraft.altitude_m * 3.28084),
+        "altitude_ft": round(altitude_m * 3.28084) if altitude_m is not None else None,
         "category_hint": c.category,  # fine to hint commercial/military/private
     }
 
 
 def candidate_reveal_view(c: "core.Candidate"):
+    altitude_m = c.aircraft.altitude_m
     return {
         "callsign": c.aircraft.callsign,
         "icao24": c.aircraft.icao24,
         "category": c.category,
         "operator": c.operator,
-        "altitude_ft": round(c.aircraft.altitude_m * 3.28084),
+        "altitude_ft": round(altitude_m * 3.28084) if altitude_m is not None else None,
         "distance_km": round(c.distance_km, 1),
     }
 
@@ -108,6 +111,29 @@ def make_comment(category, guess, revealed):
     return random.choice(CASUAL_COMMENTS["partial"])
 
 
+@app.route("/api/reference-data")
+def api_reference_data():
+    airlines = sorted(set(core.commercial_airline_dict.values()))
+    airports = [
+        "London Heathrow (LHR)", "London Gatwick (LGW)", "London Stansted (STN)",
+        "London Luton (LTN)", "London City (LCY)", "Manchester (MAN)",
+        "Liverpool (LPL)", "Leeds Bradford (LBA)", "Birmingham (BHX)",
+        "Edinburgh (EDI)", "Glasgow (GLA)", "Bristol (BRS)", "Newcastle (NCL)",
+        "Belfast International (BFS)", "Dublin (DUB)", "Amsterdam Schiphol (AMS)",
+        "Paris Charles de Gaulle (CDG)", "Paris Orly (ORY)", "Frankfurt (FRA)",
+        "Munich (MUC)", "Madrid (MAD)", "Barcelona (BCN)", "Rome Fiumicino (FCO)",
+        "Milan Malpensa (MXP)", "Zurich (ZRH)", "Vienna (VIE)", "Brussels (BRU)",
+        "Copenhagen (CPH)", "Stockholm Arlanda (ARN)", "Oslo (OSL)",
+        "Lisbon (LIS)", "Prague (PRG)", "Warsaw (WAW)", "Athens (ATH)",
+        "Istanbul (IST)", "Doha (DOH)", "Dubai (DXB)", "Abu Dhabi (AUH)",
+        "New York JFK (JFK)", "Newark (EWR)", "Los Angeles (LAX)",
+        "Chicago O'Hare (ORD)", "Toronto Pearson (YYZ)", "Singapore Changi (SIN)",
+        "Hong Kong (HKG)", "Tokyo Narita (NRT)", "Tokyo Haneda (HND)",
+        "Sydney (SYD)",
+    ]
+    return jsonify({"airlines": airlines, "airports": airports})
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -115,8 +141,18 @@ def index():
 
 @app.route("/api/next")
 def api_next():
-    lat = float(request.args.get("lat"))
-    lon = float(request.args.get("lon"))
+    lat_text = request.args.get("lat")
+    lon_text = request.args.get("lon")
+
+    if lat_text is None or lon_text is None:
+        return jsonify({"error": "lat and lon are required"}), 400
+
+    try:
+        lat = float(lat_text)
+        lon = float(lon_text)
+    except ValueError:
+        return jsonify({"error": "lat and lon must be numbers"}), 400
+
     now = time.time()
 
     stale = (now - SESSION["fetched_at"]) > 20 or SESSION["user_lat"] != lat
