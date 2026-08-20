@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": 1787235451.617147,
+    "callsign": "EXS5PV",
+    "category": "private",
+    "operator": null,
+    "guess": {
+      "airline": "",
+      "origin": "",
+      "destination": ""
+    },
+    "outcome": "guessed"
+  },
+  {
+    "timestamp": 1787235458.080967,
+    "callsign": "EXS5PV",
+    "category": "private",
+    "operator": null,
+    "guess": {
+      "airline": "",
+      "origin": "",
+      "destination": ""
+    },
+    "outcome": "guessed"
+  },
+  {
+    "timestamp": 1787235464.058662,
+    "callsign": "AAL91",
+    "category": "commercial",
+    "operator": "American Airlines",
+    "guess": {
+      "airline": "",
+      "origin": "",
+      "destination": ""
+    },
+    "outcome": "guessed"
+  }
+]
