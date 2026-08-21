@@ -1,64 +1,54 @@
 [
   {
-    "timestamp": 1787235451.617147,
-    "callsign": "EXS5PV",
-    "category": "private",
-    "operator": null,
-    "guess": {
-      "airline": "",
-      "origin": "",
-      "destination": ""
-    },
-    "outcome": "guessed"
-  },
-  {
-    "timestamp": 1787235458.080967,
-    "callsign": "EXS5PV",
-    "category": "private",
-    "operator": null,
-    "guess": {
-      "airline": "",
-      "origin": "",
-      "destination": ""
-    },
-    "outcome": "guessed"
-  },
-  {
-    "timestamp": 1787235464.058662,
-    "callsign": "AAL91",
+    "id": "a9961b-1787301003943",
+    "timestamp": 1787301003.943763,
+    "callsign": "AAL51",
     "category": "commercial",
     "operator": "American Airlines",
+    "aircraft_type": "Boeing 777 323ER",
+    "photo_thumb": "https://airport-data.com/images/aircraft/thumbnails/001/646/001646939.jpg",
+    "origin": "London Heathrow Airport",
+    "destination": "Dallas Fort Worth International Airport",
     "guess": {
       "airline": "",
+      "aircraft_type": "",
       "origin": "",
       "destination": ""
     },
     "outcome": "guessed"
   },
   {
-    "timestamp": 1787252334.460989,
-    "callsign": "RYR6970",
+    "id": "4d220b-1787301085478",
+    "timestamp": 1787301085.478056,
+    "callsign": "RYR4QG",
     "category": "commercial",
     "operator": "Ryanair",
-    "guess": null,
-    "outcome": "lost_sight"
-  },
-  {
-    "timestamp": 1787252398.998445,
-    "callsign": "RYR6970",
-    "category": "commercial",
-    "operator": "Ryanair",
-    "guess": null,
-    "outcome": "lost_sight"
-  },
-  {
-    "timestamp": 1787253478.769382,
-    "callsign": "EXS76SP",
-    "category": "commercial",
-    "operator": "Jet2",
+    "aircraft_type": "Boeing 737NG 8AS/W",
+    "photo_thumb": "https://airport-data.com/images/aircraft/thumbnails/001/767/001767471.jpg",
+    "origin": "Falcone\u2013Borsellino Airport",
+    "destination": "Dublin Airport",
     "guess": {
-      "airline": "jet2",
-      "origin": "leeds",
+      "airline": "",
+      "aircraft_type": "A400M Atlas",
+      "origin": "",
+      "destination": ""
+    },
+    "outcome": "guessed"
+  },
+  {
+    "id": "4cac24-1787301481759",
+    "timestamp": 1787301481.7599418,
+    "callsign": "RYR3417",
+    "category": "commercial",
+    "operator": "Ryanair",
+    "aircraft_type": "Boeing 737MAX 8 200",
+    "photo_thumb": "https://airport-data.com/images/aircraft/thumbnails/001/752/001752263.jpg",
+    "origin": "Glasgow Prestwick Airport (United Kingdom)",
+    "destination": "Pisa International Airport (Italy)",
+    "guess": {
+      "airline": "",
+      "aircraft_type": "",
+      "origin": "",
       "destination": ""
     },
     "outcome": "guessed"

@@ -21,33 +21,37 @@
     --mono: 'JetBrains Mono', monospace;
     --sans: 'Inter', -apple-system, sans-serif;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
   body {
-    margin: 0;
-    background: var(--bg);
+    margin: 0; background: var(--bg);
     background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(94,255,160,0.06), transparent);
-    color: var(--text);
-    font-family: var(--sans);
-    display: flex;
-    justify-content: center;
-    padding: 18px;
-    min-height: 100vh;
+    color: var(--text); font-family: var(--sans);
+    display: flex; justify-content: center; padding: 18px; min-height: 100vh;
   }
   #app { width: 100%; max-width: 420px; }
 
   .eyebrow {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
     text-transform: uppercase; color: var(--phosphor-dim);
-    display: flex; align-items: center; gap: 8px; margin: 2px 0 18px;
+    display: flex; align-items: center; gap: 8px; margin: 2px 0 14px;
   }
   .eyebrow .dot {
     width: 6px; height: 6px; border-radius: 50%; background: var(--phosphor);
     box-shadow: 0 0 6px var(--phosphor); animation: blink 2.4s ease-in-out infinite;
   }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .radius-control {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  }
+  .radius-control input[type=range] {
+    flex: 1; accent-color: var(--phosphor); height: 4px;
+  }
+  .radius-control .val { color: var(--amber); min-width: 52px; text-align: right; }
 
   .card {
     background: var(--panel); border: 1px solid var(--hairline); border-radius: 4px;
@@ -66,25 +70,34 @@
   button:hover { border-color: var(--text-dim); }
   button:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 2px; }
   button.primary { background: var(--phosphor); border-color: var(--phosphor); color: #04140C; font-weight: 600; }
-  button.ghost { background: none; }
   .row { display: flex; gap: 10px; }
 
   label {
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
     color: var(--amber-dim); display: block; margin-bottom: 6px;
   }
-  input {
-    width: 100%; padding: 12px; margin-bottom: 14px; border-radius: 3px;
-    border: 1px solid var(--hairline); background: var(--bg); color: var(--text);
-    font-family: var(--sans); font-size: 15px;
-  }
-  input:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 1px; }
 
-  /* --- Compass (signature element) --- */
+  /* --- custom dropdown (replaces datalist - iOS Safari doesn't render datalist suggestions) --- */
+  .field { position: relative; margin-bottom: 14px; }
+  .field input {
+    width: 100%; padding: 12px; border-radius: 3px; border: 1px solid var(--hairline);
+    background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px;
+  }
+  .field input:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 1px; }
+  .dropdown-list {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+    background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: 3px;
+    max-height: 180px; overflow-y: auto; z-index: 20; display: none;
+  }
+  .dropdown-list.open { display: block; }
+  .dropdown-item { padding: 10px 12px; font-size: 14px; cursor: pointer; }
+  .dropdown-item:hover, .dropdown-item.highlighted { background: var(--hairline); }
+  .dropdown-empty { padding: 10px 12px; font-size: 13px; color: var(--text-dim); font-style: italic; }
+
+  /* --- Compass --- */
   .rose-wrap { display: flex; justify-content: center; margin: 4px 0 6px; position: relative; }
   .rose { width: 176px; height: 176px; }
   .rose-ring { fill: none; stroke: var(--hairline); stroke-width: 1; }
-  .rose-tick { stroke: var(--text-dim); stroke-width: 1; }
   .rose-tick.major { stroke: var(--phosphor-dim); stroke-width: 1.5; }
   .rose-label { fill: var(--text-dim); font-family: var(--mono); font-size: 9px; text-anchor: middle; }
   .rose-label.north { fill: var(--amber); font-weight: 700; }
@@ -95,9 +108,7 @@
   .rose-center { fill: var(--bg); stroke: var(--text-dim); stroke-width: 1.5; }
   .align-pulse { fill: none; stroke: var(--phosphor); stroke-width: 1.5; opacity: 0; }
   .align-pulse.active { animation: pulse-ring 1.4s ease-out infinite; }
-  @keyframes pulse-ring {
-    0% { r: 46; opacity: 0.7; } 100% { r: 82; opacity: 0; }
-  }
+  @keyframes pulse-ring { 0% { r: 46; opacity: 0.7; } 100% { r: 82; opacity: 0; } }
 
   .aligned-tag {
     text-align: center; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
@@ -129,16 +140,38 @@
   @keyframes rotate { to { transform: rotate(360deg); } }
   .sweep-label { font-family: var(--mono); font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
 
+  /* --- Reveal breakdown --- */
+  .photo-wrap {
+    width: 100%; height: 140px; border-radius: 3px; overflow: hidden;
+    background: var(--bg); border: 1px solid var(--hairline);
+    display: flex; align-items: center; justify-content: center; margin-bottom: 16px;
+  }
+  .photo { width: 100%; height: 100%; object-fit: cover; }
+  .silhouette { width: 70%; height: 70%; }
+
+  .hist-delete {
+    flex: none; width: 28px; height: 28px; padding: 0; margin-left: 8px;
+    border-radius: 3px; background: none; border: 1px solid var(--hairline);
+    color: var(--text-dim); font-size: 14px; line-height: 1;
+  }
+  .hist-delete:hover { color: #ff6b6b; border-color: #ff6b6b; }
+
   .strip { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
   .callsign { font-family: var(--mono); font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
-  .meta-line { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+  .operator-line { font-family: var(--sans); font-size: 14px; color: var(--text-dim); margin-bottom: 4px; }
+  .route-line { font-family: var(--mono); font-size: 13px; color: var(--amber); margin-bottom: 16px; }
   .comment {
     font-family: var(--sans); font-style: italic; font-size: 14px; color: var(--text);
     background: var(--bg); border-left: 2px solid var(--phosphor-dim);
-    padding: 10px 14px; border-radius: 0 3px 3px 0; margin-bottom: 4px;
+    padding: 10px 14px; border-radius: 0 3px 3px 0; margin-bottom: 18px;
   }
+  .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+  .data-cell { background: var(--panel); padding: 10px 12px; }
+  .data-cell.wide { grid-column: 1 / -1; }
+  .data-cell .k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber-dim); margin-bottom: 3px; }
+  .data-cell .v { font-family: var(--mono); font-size: 15px; color: var(--text); }
 
-  .tabbar { display: flex; gap: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--hairline); }
+  .tabbar { display: flex; gap: 20px; margin-bottom: 18px; border-bottom: 1px solid var(--hairline); }
   .tabbar button {
     flex: none; background: none; border: none; border-radius: 0; color: var(--text-dim);
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase;
@@ -169,6 +202,13 @@
 <body>
 <div id="app">
   <div class="eyebrow"><span class="dot"></span> plane spotter</div>
+
+  <div class="radius-control">
+    <span>radius</span>
+    <input type="range" id="radiusSlider" min="2" max="60" value="15" oninput="onRadiusInput(this.value)">
+    <span class="val" id="radiusVal">15 km</span>
+  </div>
+
   <div class="tabbar">
     <button id="tabSpot" class="active" onclick="showTab('spot')">Spot</button>
     <button id="tabHistory" onclick="showTab('history')">Log</button>
@@ -181,11 +221,21 @@
 let userLat = null, userLon = null;
 let currentCandidate = null;
 let stage = "prompt";
-let deviceHeading = null;   // live compass heading, null until available
+let deviceHeading = null;
 let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
+let radiusKm = 15;
+let radiusDebounce = null;
+console.log('plane spotter frontend: v5 (route with country, full table)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
+
+function onRadiusInput(val) {
+  radiusKm = Number(val);
+  document.getElementById('radiusVal').textContent = radiusKm + ' km';
+  clearTimeout(radiusDebounce);
+  radiusDebounce = setTimeout(() => { fetchNext(); }, 500);
+}
 
 function showTab(tab) {
   document.getElementById('tabSpot').classList.toggle('active', tab === 'spot');
@@ -193,6 +243,37 @@ function showTab(tab) {
   document.getElementById('spotView').style.display = tab === 'spot' ? 'block' : 'none';
   document.getElementById('historyView').style.display = tab === 'history' ? 'block' : 'none';
   if (tab === 'history') loadHistory(activeFilter || 'all');
+}
+
+/* ---------- custom dropdown (works on iOS Safari, unlike <datalist>) ---------- */
+function setupDropdown(inputId, listId, options) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  if (!input || !list) return;
+  let highlighted = -1;
+
+  function renderOptions(filter) {
+    const q = (filter || '').trim().toLowerCase();
+    const matches = q ? options.filter(o => o.toLowerCase().includes(q)) : options;
+    highlighted = -1;
+    if (!matches.length) {
+      list.innerHTML = `<div class="dropdown-empty">no matches &mdash; you can still type your own</div>`;
+    } else {
+      list.innerHTML = matches.slice(0, 30).map((o, i) =>
+        `<div class="dropdown-item" data-idx="${i}" onclick="selectDropdownItem('${inputId}','${listId}', this.textContent)">${o}</div>`
+      ).join('');
+    }
+    list.classList.add('open');
+  }
+
+  input.addEventListener('focus', () => renderOptions(input.value));
+  input.addEventListener('input', () => renderOptions(input.value));
+  input.addEventListener('blur', () => setTimeout(() => list.classList.remove('open'), 150));
+}
+
+function selectDropdownItem(inputId, listId, text) {
+  document.getElementById(inputId).value = text;
+  document.getElementById(listId).classList.remove('open');
 }
 
 /* ---------- compass rose rendering ---------- */
@@ -204,7 +285,7 @@ function polarPoint(cx, cy, r, angleDeg) {
 function roseSVG() {
   const points = ['N','NE','E','SE','S','SW','W','NW'];
   const ticks = points.map((p, i) => {
-    const angle = i * 45, major = true;
+    const angle = i * 45;
     const [x1, y1] = polarPoint(88, 88, 66, angle);
     const [x2, y2] = polarPoint(88, 88, 76, angle);
     const [lx, ly] = polarPoint(88, 88, 54, angle);
@@ -232,7 +313,6 @@ function updateRoseOrientation() {
   const pulse = document.getElementById('alignPulse');
   const tag = document.getElementById('alignedTag');
   if (!wedge || !needle || !currentCandidate) return;
-
   const target = currentCandidate.bearing_deg;
 
   if (deviceHeading !== null) {
@@ -252,13 +332,12 @@ function updateRoseOrientation() {
   }
 }
 
-/* ---------- device compass wiring ---------- */
 function handleOrientation(event) {
   let heading = null;
   if (typeof event.webkitCompassHeading === 'number') {
-    heading = event.webkitCompassHeading; // iOS Safari: already true compass heading
+    heading = event.webkitCompassHeading;
   } else if (event.absolute && event.alpha !== null) {
-    heading = (360 - event.alpha) % 360; // Android: approximate
+    heading = (360 - event.alpha) % 360;
   }
   if (heading !== null) {
     deviceHeading = heading;
@@ -281,15 +360,25 @@ async function enableCompass() {
 }
 
 /* ---------- rendering ---------- */
+function silhouetteMarkup(category) {
+  if (category === 'military') {
+    return `<svg viewBox="0 0 120 60" class="silhouette">
+      <path d="M10 30 L45 26 L55 8 L62 8 L58 26 L78 26 L92 14 L98 14 L90 30 L98 46 L92 46 L78 34 L58 34 L62 52 L55 52 L45 34 L10 30 Z" fill="var(--text-dim)" opacity="0.5"/>
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 120 60" class="silhouette">
+    <path d="M6 30 L48 28 L58 6 L64 6 L60 28 L100 28 L112 22 L116 24 L106 32 L116 40 L112 42 L100 36 L60 36 L64 54 L58 54 L48 32 L6 32 Z" fill="var(--text-dim)" opacity="0.5"/>
+  </svg>`;
+}
+
 function render() {
   const el = document.getElementById('spotView');
   if (stage === "loading") {
     el.innerHTML = `<div class="card"><div class="sweep-wrap">
-      <div class="sweep"></div>
-      <div class="sweep-label">scanning nearby traffic&hellip;</div>
+      <div class="sweep"></div><div class="sweep-label">scanning nearby traffic&hellip;</div>
     </div></div>`;
   } else if (stage === "none") {
-    el.innerHTML = `<div class="card status">nothing within range right now<br><br>
+    el.innerHTML = `<div class="card status">nothing within ${radiusKm}km right now<br><br>
       <button class="primary" onclick="fetchNext()">scan again</button></div>`;
   } else if (stage === "prompt") {
     const c = currentCandidate;
@@ -316,31 +405,73 @@ function render() {
     updateRoseOrientation();
   } else if (stage === "guess") {
     const showRoute = currentCandidate.category_hint === "commercial";
-    const airlineOpts = referenceData.airlines.map(a => `<option value="${a}">`).join('');
-    const airportOpts = referenceData.airports.map(a => `<option value="${a}">`).join('');
     el.innerHTML = `
       <div class="card">
-        <label>Airline / operator</label>
-        <input id="gAirline" list="airlineList" placeholder="start typing&hellip;" autocomplete="off">
-        <datalist id="airlineList">${airlineOpts}</datalist>
+        <div class="field">
+          <label>Airline / operator</label>
+          <input id="gAirline" placeholder="start typing&hellip;" autocomplete="off">
+          <div class="dropdown-list" id="gAirlineList"></div>
+        </div>
+        <div class="field">
+          <label>Aircraft type</label>
+          <input id="gType" placeholder="e.g. Airbus A320" autocomplete="off">
+          <div class="dropdown-list" id="gTypeList"></div>
+        </div>
         ${showRoute ? `
-        <label>Origin</label>
-        <input id="gOrigin" list="airportList" placeholder="start typing&hellip;" autocomplete="off">
-        <label>Destination</label>
-        <input id="gDest" list="airportList" placeholder="start typing&hellip;" autocomplete="off">
-        <datalist id="airportList">${airportOpts}</datalist>` : ""}
+        <div class="field">
+          <label>Origin</label>
+          <input id="gOrigin" placeholder="start typing&hellip;" autocomplete="off">
+          <div class="dropdown-list" id="gOriginList"></div>
+        </div>
+        <div class="field">
+          <label>Destination</label>
+          <input id="gDest" placeholder="start typing&hellip;" autocomplete="off">
+          <div class="dropdown-list" id="gDestList"></div>
+        </div>` : ""}
       </div>
       <div class="row">
         <button onclick="reveal(true)">lost it</button>
         <button class="primary" onclick="reveal(false)">reveal</button>
       </div>`;
+    setupDropdown('gAirline', 'gAirlineList', referenceData.airlines);
+    setupDropdown('gType', 'gTypeList', referenceData.aircraft_types);
+    if (showRoute) {
+      setupDropdown('gOrigin', 'gOriginList', referenceData.airports);
+      setupDropdown('gDest', 'gDestList', referenceData.airports);
+    }
   } else if (stage === "reveal") {
     const r = currentCandidate.revealed;
+    const routeLine = (r.origin || r.destination)
+      ? `${r.origin || 'unknown'} &rarr; ${r.destination || 'unknown'}`
+      : null;
+    const cells = [
+      ['Operator', r.operator || 'unknown'],
+      ['Aircraft type', r.aircraft_type || 'unknown'],
+      ['Category', r.category],
+      ['Aircraft ID', r.icao24],
+      ['Origin', r.origin || 'unknown'],
+      ['Destination', r.destination || 'unknown'],
+      ['Altitude', r.altitude_ft.toLocaleString() + ' ft'],
+      ['Distance', r.distance_km + ' km'],
+      ['Ground speed', r.speed_mph ? r.speed_mph + ' mph' : 'n/a'],
+      ['Heading', r.heading_compass ? r.heading_compass + ' (' + r.heading_deg + '\u00b0)' : 'n/a'],
+      ['You looked', r.look_compass],
+    ];
+    const wideKeys = new Set(['Origin', 'Destination']);
     el.innerHTML = `
       <div class="card">
+        <div class="photo-wrap">
+          ${r.photo_thumb
+            ? `<img src="${r.photo_thumb}" class="photo" alt="${r.aircraft_type || 'aircraft'}" onerror="this.parentElement.innerHTML=silhouetteMarkup('${r.category}')">`
+            : silhouetteMarkup(r.category)}
+        </div>
         <div class="strip"><span class="callsign">${r.callsign}</span><span class="badge">${r.category}</span></div>
-        <div class="meta-line">${r.operator || '&mdash;'} &middot; ${r.altitude_ft.toLocaleString()} ft &middot; ${r.distance_km} km</div>
+        <div class="operator-line">${r.operator || 'operator unknown'}</div>
+        ${routeLine ? `<div class="route-line">${routeLine}</div>` : ""}
         <div class="comment">${currentCandidate.comment}</div>
+        <div class="data-grid">
+          ${cells.map(([k, v]) => `<div class="data-cell ${wideKeys.has(k) ? 'wide' : ''}"><div class="k">${k}</div><div class="v" style="${wideKeys.has(k) ? 'font-size:13px;' : ''}">${v}</div></div>`).join('')}
+        </div>
       </div>
       <button class="primary" style="width:100%;" onclick="fetchNext()">spot another</button>`;
   }
@@ -359,7 +490,7 @@ async function fetchNext() {
   stage = "loading"; render();
   try {
     if (userLat === null) [userLat, userLon] = await getLocation();
-    const res = await fetch(`/api/next?lat=${userLat}&lon=${userLon}`);
+    const res = await fetch(`/api/next?lat=${userLat}&lon=${userLon}&radius=${radiusKm}`);
     const data = await res.json();
     if (!data.found) { stage = "none"; render(); return; }
     currentCandidate = data;
@@ -384,6 +515,7 @@ function goGuess() { stage = "guess"; render(); }
 async function reveal(lostSight) {
   const guess = lostSight ? {} : {
     airline: document.getElementById('gAirline')?.value || "",
+    aircraft_type: document.getElementById('gType')?.value || "",
     origin: document.getElementById('gOrigin')?.value || "",
     destination: document.getElementById('gDest')?.value || "",
   };
@@ -407,11 +539,16 @@ async function loadHistory(filter) {
     `<span class="pill ${f === activeFilter ? 'active' : ''}" onclick="loadHistory('${f}')">${f}</span>`
   ).join('');
   const rows = items.length ? items.map(h => `
-    <div class="hist-item">
-      <div>${h.callsign || 'unidentified'}
-        <div class="sub">${h.operator || h.category} &middot; ${h.outcome === 'lost_sight' ? 'lost sight' : 'guessed'}</div>
+    <div class="hist-item" id="hist-${h.id}">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+        ${h.photo_thumb ? `<img src="${h.photo_thumb}" style="width:34px;height:34px;object-fit:cover;border-radius:3px;flex:none;">` : ''}
+        <div style="min-width:0;">
+          ${h.callsign || 'unidentified'}
+          <div class="sub">${h.aircraft_type || h.operator || h.category} &middot; ${h.outcome === 'lost_sight' ? 'lost sight' : 'guessed'}</div>
+        </div>
       </div>
       <span class="badge">${h.category}</span>
+      <button class="hist-delete" onclick="deleteHistoryEntry('${h.id}')" aria-label="delete">&times;</button>
     </div>`).join('') : `<div class="status">log is empty &mdash; go spot something</div>`;
   document.getElementById('historyView').innerHTML = `
     <div class="card">
@@ -419,6 +556,13 @@ async function loadHistory(filter) {
       <div style="margin-bottom:4px;">${pills}</div>
       ${rows}
     </div>`;
+}
+
+async function deleteHistoryEntry(id) {
+  const row = document.getElementById(`hist-${id}`);
+  if (row) row.style.opacity = '0.3';
+  await fetch(`/api/history/${id}`, { method: 'DELETE' });
+  loadHistory(activeFilter);
 }
 
 fetchNext();
