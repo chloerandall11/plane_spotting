@@ -187,6 +187,23 @@ def fetch_nearby_aircraft(user_lat, user_lon, radius_km=SEARCH_RADIUS_KM):
     return aircraft
 
 
+def refresh_candidate(candidate: Candidate, user_lat, user_lon, user_altitude_m, seconds_elapsed):
+    """Recomputes distance/elevation/bearing for a candidate using its
+    extrapolated position at 'seconds_elapsed' since it was first
+    fetched, rather than the stale snapshot from find_candidates().
+    Mutates and returns the same candidate."""
+    lat, lon = extrapolate_position(candidate.aircraft, seconds_elapsed)
+    distance_km = haversine_km(user_lat, user_lon, lat, lon)
+    elevation = elevation_angle_deg(candidate.aircraft.altitude_m, user_altitude_m, distance_km)
+    bearing = bearing_deg(user_lat, user_lon, lat, lon)
+
+    candidate.distance_km = distance_km
+    candidate.elevation_deg = elevation
+    candidate.bearing_deg = bearing
+    candidate.compass = bearing_to_compass(bearing)
+    return candidate
+
+
 def find_candidates(user_lat, user_lon, user_altitude_m=0.0, seconds_since_fetch=0.0, radius_km=None):
     """Returns candidates sorted best-first (easiest realistic spot first).
     radius_km overrides the default search/cutoff distance for this call."""

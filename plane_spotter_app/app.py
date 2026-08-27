@@ -10,9 +10,12 @@ with `ipconfig` (Windows) or `ifconfig` / `ip addr` (Mac/Linux) -
 look for something like 192.168.x.x.
 """
 
+import csv
+import io
 import json
 import os
 import random
+import re
 import time
 
 import requests
@@ -23,7 +26,11 @@ import core
 app = Flask(__name__)
 
 HISTORY_PATH = os.path.join(os.path.dirname(__file__), "history.json")
+AIRPORTS_CACHE_PATH = os.path.join(os.path.dirname(__file__), "airports_cache.json")
 ADSBDB_BASE = "https://api.adsbdb.com/v0"
+# OurAirports publishes a free, comprehensive worldwide airport list
+# (covers small regional fields like Newquay/NQY, not just majors).
+OURAIRPORTS_CSV_URL = "https://ourairports.com/data/airports.csv"
 
 # Simple in-memory caches so we don't re-hit adsbdb.com for the same
 # aircraft/callsign repeatedly in one session.
@@ -121,6 +128,71 @@ def lookup_route(callsign):
     return result
 
 
+def strip_parenthetical(s):
+    """'Newquay Cornwall (NQY)' -> 'newquay cornwall' - lets us compare
+    a guess (which has an IATA code in brackets) against the revealed
+    answer (which has a country in brackets) on the airport name alone."""
+    if not s:
+        return ""
+    return re.sub(r"\(.*?\)", "", s).strip().lower()
+
+
+def field_match(guess_val, actual_val):
+    """Returns True/False if guess_val was provided, None if it wasn't
+    (so the frontend knows not to color that cell at all)."""
+    guess_val = (guess_val or "").strip()
+    if not guess_val:
+        return None
+    g = strip_parenthetical(guess_val)
+    a = strip_parenthetical(actual_val or "")
+    if not a:
+        return False
+    return g in a or a in g
+
+
+# Small fallback list used only if the full airport database can't be
+# downloaded (e.g. no internet on first run).
+FALLBACK_AIRPORTS = [
+    "London Heathrow (LHR)", "London Gatwick (LGW)", "London Stansted (STN)",
+    "London Luton (LTN)", "Manchester (MAN)", "Liverpool (LPL)",
+    "Edinburgh (EDI)", "Glasgow (GLA)", "Dublin (DUB)",
+    "Amsterdam Schiphol (AMS)", "Paris Charles de Gaulle (CDG)",
+    "Frankfurt (FRA)", "Madrid (MAD)", "Dubai (DXB)", "New York JFK (JFK)",
+]
+
+
+def get_all_airports():
+    """Loads the full worldwide airport list (name + IATA code) for the
+    guess dropdown, caching it to disk after the first download so we
+    don't re-fetch a multi-MB CSV on every restart."""
+    if os.path.exists(AIRPORTS_CACHE_PATH):
+        try:
+            with open(AIRPORTS_CACHE_PATH, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    try:
+        resp = requests.get(OURAIRPORTS_CSV_URL, timeout=20)
+        resp.raise_for_status()
+        reader = csv.DictReader(io.StringIO(resp.text))
+        airports = []
+        for row in reader:
+            iata = (row.get("iata_code") or "").strip()
+            name = (row.get("name") or "").strip()
+            if iata and name:
+                airports.append(f"{name} ({iata})")
+        airports = sorted(set(airports))
+        if airports:
+            with open(AIRPORTS_CACHE_PATH, "w") as f:
+                json.dump(airports, f)
+            return airports
+    except (requests.RequestException, csv.Error):
+        pass
+
+    return FALLBACK_AIRPORTS
+
+
 def load_history():
     if not os.path.exists(HISTORY_PATH):
         return []
@@ -179,45 +251,12 @@ def candidate_reveal_view(c: "core.Candidate"):
     }
 
 
-def make_comment(category, guess, revealed):
-    guess = (guess or {})
-    if not guess or not any(guess.values()):
+def make_comment(guess_result):
+    scored = [v for v in guess_result.values() if v is not None]
+    if not scored:
         return random.choice(CASUAL_COMMENTS["no_guess"])
-
-    hits, attempts = 0, 0
-
-    guessed_airline = (guess.get("airline") or "").strip().lower()
-    if guessed_airline:
-        attempts += 1
-        actual = (revealed.get("operator") or "").strip().lower()
-        if actual and guessed_airline in actual:
-            hits += 1
-
-    guessed_type = (guess.get("aircraft_type") or "").strip().lower()
-    if guessed_type:
-        attempts += 1
-        actual = (revealed.get("aircraft_type") or "").strip().lower()
-        if actual and (guessed_type in actual or actual in guessed_type):
-            hits += 1
-
-    if category == "commercial":
-        guessed_origin = (guess.get("origin") or "").strip().lower()
-        if guessed_origin:
-            attempts += 1
-            actual = (revealed.get("origin") or "").strip().lower()
-            if actual and guessed_origin in actual:
-                hits += 1
-
-        guessed_dest = (guess.get("destination") or "").strip().lower()
-        if guessed_dest:
-            attempts += 1
-            actual = (revealed.get("destination") or "").strip().lower()
-            if actual and guessed_dest in actual:
-                hits += 1
-
-    if attempts == 0:
-        return random.choice(CASUAL_COMMENTS["no_guess"])
-    ratio = hits / attempts
+    hits = sum(1 for v in scored if v)
+    ratio = hits / len(scored)
     if ratio >= 0.75:
         return random.choice(CASUAL_COMMENTS["correct"])
     if ratio > 0:
@@ -240,23 +279,7 @@ def api_reference_data():
         "Chinook", "Eurofighter Typhoon", "Hercules C-130",
         "Gulfstream", "Cessna Citation", "Bombardier Global Express",
     ]
-    airports = [
-        "London Heathrow (LHR)", "London Gatwick (LGW)", "London Stansted (STN)",
-        "London Luton (LTN)", "London City (LCY)", "Manchester (MAN)",
-        "Liverpool (LPL)", "Leeds Bradford (LBA)", "Birmingham (BHX)",
-        "Edinburgh (EDI)", "Glasgow (GLA)", "Bristol (BRS)", "Newcastle (NCL)",
-        "Belfast International (BFS)", "Dublin (DUB)", "Amsterdam Schiphol (AMS)",
-        "Paris Charles de Gaulle (CDG)", "Paris Orly (ORY)", "Frankfurt (FRA)",
-        "Munich (MUC)", "Madrid (MAD)", "Barcelona (BCN)", "Rome Fiumicino (FCO)",
-        "Milan Malpensa (MXP)", "Zurich (ZRH)", "Vienna (VIE)", "Brussels (BRU)",
-        "Copenhagen (CPH)", "Stockholm Arlanda (ARN)", "Oslo (OSL)",
-        "Lisbon (LIS)", "Prague (PRG)", "Warsaw (WAW)", "Athens (ATH)",
-        "Istanbul (IST)", "Doha (DOH)", "Dubai (DXB)", "Abu Dhabi (AUH)",
-        "New York JFK (JFK)", "Newark (EWR)", "Los Angeles (LAX)",
-        "Chicago O'Hare (ORD)", "Toronto Pearson (YYZ)", "Singapore Changi (SIN)",
-        "Hong Kong (HKG)", "Tokyo Narita (NRT)", "Tokyo Haneda (HND)",
-        "Sydney (SYD)",
-    ]
+    airports = get_all_airports()
     return jsonify({"airlines": airlines, "airports": airports, "aircraft_types": aircraft_types})
 
 
@@ -290,7 +313,7 @@ def api_next():
         return jsonify({"found": False})
 
     idx = min(SESSION["index"], len(candidates) - 1)
-    c = candidates[idx]
+    c = core.refresh_candidate(candidates[idx], lat, lon, 0.0, now - SESSION["fetched_at"])
     return jsonify({"found": True, **candidate_public_view(c)})
 
 
@@ -300,7 +323,10 @@ def api_skip():
     candidates = SESSION["candidates"]
     if not candidates or SESSION["index"] >= len(candidates):
         return jsonify({"found": False})
-    c = candidates[SESSION["index"]]
+    c = core.refresh_candidate(
+        candidates[SESSION["index"]], SESSION["user_lat"], SESSION["user_lon"],
+        0.0, time.time() - SESSION["fetched_at"],
+    )
     return jsonify({"found": True, **candidate_public_view(c)})
 
 
@@ -316,8 +342,22 @@ def api_reveal():
         return jsonify({"error": "no active candidate"}), 400
 
     c = candidates[idx]
+
+    # The candidate's distance/bearing were computed when it was first
+    # fetched - refresh them now so a slow guesser doesn't see a stale
+    # distance for a plane that's since moved on.
+    seconds_elapsed = time.time() - SESSION["fetched_at"]
+    c = core.refresh_candidate(c, SESSION["user_lat"], SESSION["user_lon"], 0.0, seconds_elapsed)
+
     revealed = candidate_reveal_view(c)
-    comment = make_comment(c.category, None if lost_sight else guess, revealed)
+
+    guess_result = {} if lost_sight else {
+        "airline": field_match(guess.get("airline"), revealed["operator"]),
+        "aircraft_type": field_match(guess.get("aircraft_type"), revealed["aircraft_type"]),
+        "origin": field_match(guess.get("origin"), revealed["origin"]),
+        "destination": field_match(guess.get("destination"), revealed["destination"]),
+    }
+    comment = make_comment(guess_result)
 
     history = load_history()
     entry_id = f"{c.aircraft.icao24}-{int(time.time() * 1000)}"
@@ -336,7 +376,7 @@ def api_reveal():
     })
     save_history(history)
 
-    return jsonify({"revealed": revealed, "comment": comment})
+    return jsonify({"revealed": revealed, "comment": comment, "guess_result": guess_result})
 
 
 @app.route("/api/history")
@@ -360,5 +400,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v5 (route with country, full table) <<<")
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    print(">>> plane spotter backend: v6 (full airports, live distance, guess coloring, HQ photos) <<<")
+    port = int(os.environ.get("PORT", 5050))
+    app.run(host="0.0.0.0", port=port, debug=(port == 5050))

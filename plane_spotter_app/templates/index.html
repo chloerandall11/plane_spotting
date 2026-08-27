@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Plane Spotter</title>
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0A0F0D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Plane Spotter">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<link rel="icon" href="/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -168,6 +175,8 @@
   .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
   .data-cell { background: var(--panel); padding: 10px 12px; }
   .data-cell.wide { grid-column: 1 / -1; }
+  .data-cell.correct { background: rgba(94,255,160,0.10); box-shadow: inset 2px 0 0 var(--phosphor); }
+  .data-cell.wrong { background: rgba(255,107,107,0.10); box-shadow: inset 2px 0 0 #ff6b6b; }
   .data-cell .k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber-dim); margin-bottom: 3px; }
   .data-cell .v { font-family: var(--mono); font-size: 15px; color: var(--text); }
 
@@ -226,7 +235,7 @@ let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v5 (route with country, full table)');
+console.log('plane spotter frontend: v6 (full airports, live distance, guess coloring, HQ photos)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
@@ -458,11 +467,18 @@ function render() {
       ['You looked', r.look_compass],
     ];
     const wideKeys = new Set(['Origin', 'Destination']);
+    const resultKeyByLabel = {
+      'Operator': 'airline',
+      'Aircraft type': 'aircraft_type',
+      'Origin': 'origin',
+      'Destination': 'destination',
+    };
+    const guessResult = currentCandidate.guessResult || {};
     el.innerHTML = `
       <div class="card">
         <div class="photo-wrap">
-          ${r.photo_thumb
-            ? `<img src="${r.photo_thumb}" class="photo" alt="${r.aircraft_type || 'aircraft'}" onerror="this.parentElement.innerHTML=silhouetteMarkup('${r.category}')">`
+          ${r.photo || r.photo_thumb
+            ? `<img src="${r.photo || r.photo_thumb}" class="photo" alt="${r.aircraft_type || 'aircraft'}" onerror="this.parentElement.innerHTML=silhouetteMarkup('${r.category}')">`
             : silhouetteMarkup(r.category)}
         </div>
         <div class="strip"><span class="callsign">${r.callsign}</span><span class="badge">${r.category}</span></div>
@@ -470,7 +486,12 @@ function render() {
         ${routeLine ? `<div class="route-line">${routeLine}</div>` : ""}
         <div class="comment">${currentCandidate.comment}</div>
         <div class="data-grid">
-          ${cells.map(([k, v]) => `<div class="data-cell ${wideKeys.has(k) ? 'wide' : ''}"><div class="k">${k}</div><div class="v" style="${wideKeys.has(k) ? 'font-size:13px;' : ''}">${v}</div></div>`).join('')}
+          ${cells.map(([k, v]) => {
+            const resultKey = resultKeyByLabel[k];
+            const match = resultKey ? guessResult[resultKey] : null;
+            const cls = [wideKeys.has(k) ? 'wide' : '', match === true ? 'correct' : match === false ? 'wrong' : ''].join(' ').trim();
+            return `<div class="data-cell ${cls}"><div class="k">${k}</div><div class="v" style="${wideKeys.has(k) ? 'font-size:13px;' : ''}">${v}</div></div>`;
+          }).join('')}
         </div>
       </div>
       <button class="primary" style="width:100%;" onclick="fetchNext()">spot another</button>`;
@@ -527,6 +548,7 @@ async function reveal(lostSight) {
   const data = await res.json();
   currentCandidate.revealed = data.revealed;
   currentCandidate.comment = data.comment;
+  currentCandidate.guessResult = data.guess_result || {};
   stage = "reveal"; render();
 }
 
@@ -566,6 +588,12 @@ async function deleteHistoryEntry(id) {
 }
 
 fetchNext();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
