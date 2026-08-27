@@ -1,43 +1,61 @@
-""" 
-Creating script to support fun plane application
+"""
+Plane spotting app - core logic
 
 Given a user's location, finds the best "overhead" aircraft candidate
 from OpenSky Network data, works out which compass direction to look,
 and classifies the aircraft as commercial / military / private so the
 guessing UI can show the right fields.
 
-Requires: 
-pip install requests --break-system-packages
-pip install astropy
+Requires: pip install requests --break-system-packages
 """
 
-import re 
-import math 
-from astropy import constants as const # for earth's radius
-from dataclasses import dataclass # stores data in airplane search
+import math
+import re
+import time
+from dataclasses import dataclass, field
 from typing import Optional
+
 import requests
 
-opensky_api_url = "https://opensky-network.org/api/states/all"
+OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
 
-# setting limits
-min_elevation_deg = 15 # degrees above horizon
-search_radius_km = 15 # distance to scan for aircraft 
+# Minimum elevation angle (degrees above horizon) to bother suggesting
+# a plane - anything lower is hard to spot and easy to lose in clutter.
+MIN_ELEVATION_DEG = 15.0
 
-# compass directions
-compass_directions = [ "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+# How far out to even consider aircraft, in km. Kept tight so results
+# are things you can plausibly make out with the naked eye.
+SEARCH_RADIUS_KM = 15.0
 
-# common commerical airline identifiers
-#TODO should load from a real airline designator table for full scope
-commercial_airline_dict = {"BAW": "British Airways", "RYR": "Ryanair", "EZY": "easyJet",
+# Hard cutoff: candidates further than this are dropped entirely,
+# regardless of altitude/elevation.
+MAX_DISTANCE_KM = 15.0
+
+COMPASS_POINTS = [
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+]
+
+# A short list of known 3-letter ICAO airline prefixes used for the
+# commercial-vs-not check. In a real build, load this from a full
+# ICAO airline designator table (a few thousand rows) instead.
+KNOWN_AIRLINE_PREFIXES = {
+    "BAW": "British Airways", "RYR": "Ryanair", "EZY": "easyJet",
     "VIR": "Virgin Atlantic", "AFR": "Air France", "DLH": "Lufthansa",
     "UAE": "Emirates", "AAL": "American Airlines", "UAL": "United Airlines",
     "DAL": "Delta Air Lines", "KLM": "KLM", "QFA": "Qantas",
-    "JBU": "JetBlue", "WZZ": "Wizz Air", "TAP": "TAP Air Portugal",}
+    "JBU": "JetBlue", "WZZ": "Wizz Air", "TAP": "TAP Air Portugal",
+    "EIN": "Aer Lingus", "NOZ": "Norwegian", "TOM": "TUI Airways",
+    "EXS": "Jet2", "THY": "Turkish Airlines", "QTR": "Qatar Airways",
+    "IBE": "Iberia", "SAS": "SAS", "SWR": "Swiss", "AUA": "Austrian Airlines",
+    "FIN": "Finnair", "ITY": "ITA Airways", "LOT": "LOT Polish Airlines",
+    "ACA": "Air Canada", "CPA": "Cathay Pacific", "SIA": "Singapore Airlines",
+    "ANA": "All Nippon Airways", "JAL": "Japan Airlines", "ETD": "Etihad Airways",
+}
 
-# common military airline identifiers
-military_airline_dict = [
+# Military callsign patterns vary a lot by country/branch. This is a
+# starter set - extend as you find more real-world examples.
+MILITARY_CALLSIGN_PATTERNS = [
     r"^RRR\d+$",       # RAF
     r"^ASCOT\d*$",     # RAF transport
     r"^NATO\d*$",
@@ -48,9 +66,9 @@ military_airline_dict = [
     r"^RCH\d+$",       # USAF airlift (alt format)
 ]
 
-@dataclass #TODO learn about dataclasses
+
+@dataclass
 class Aircraft:
-    """Contains aircraft info"""
     icao24: str
     callsign: str
     lat: float
@@ -62,7 +80,6 @@ class Aircraft:
 
 @dataclass
 class Candidate:
-    """Contains candidate info"""
     aircraft: Aircraft
     distance_km: float
     elevation_deg: float
@@ -72,55 +89,44 @@ class Candidate:
     operator: Optional[str]  # resolved airline/operator name, if known
 
 
-def haversine_equation(latA, lonA, latB, lonB):
-    """
-    Calculates the shortest great-circle distance 
-    between two points on a sphere using their latitudes
-    and longitudes
-    """
-    r = const.R_earth.to("km").value
-    p1, p2 = math.radians(latA), math.radians(latB)
-    dphi = math.radians(latB - latA)
-    dlambda = math.radians(lonB - lonA)
+def haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
 
-    haversine = 2 * r * math.asin(math.sqrt(a))
 
-    return haversine
-
-def direction_angle(latA, lonA, latB, lonB):
-    """Direction in degrees from point A towards point B"""
-    p1, p2 = math.radians(latA), math.radians(latB)
-    dlambda = math.radians(lonB - lonA)
+def bearing_deg(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
     x = math.sin(dlambda) * math.cos(p2)
     y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dlambda)
-    dir_ang =  (math.degrees(math.atan2(x, y)) + 360) % 360
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
 
-    return dir_ang
 
-def angle_to_compass(dir_ang):
-    """Converts angle to compass direction"""
-    dict_id = round(dir_ang/22.5) % 16 #TODO why?
-    return compass_directions[dict_id]
+def bearing_to_compass(bearing):
+    idx = round(bearing / 22.5) % 16
+    return COMPASS_POINTS[idx]
+
 
 def elevation_angle_deg(altitude_m, user_altitude_m, ground_distance_km):
-    """Elevation angle between point A and B"""
-    ground_distance_m = 1000 * ground_distance_km
     height_diff_m = altitude_m - user_altitude_m
+    ground_distance_m = ground_distance_km * 1000
     if ground_distance_m == 0:
-        return 90
-    
-    elevation_angle = math.degrees(math.atan2(height_diff_m, ground_distance_m))
-    return elevation_angle
+        return 90.0
+    return math.degrees(math.atan2(height_diff_m, ground_distance_m))
+
 
 def extrapolate_position(aircraft: Aircraft, seconds_elapsed: float):
-    """FROM CLAUDE - Nudge a stale position forward using velocity + heading, so the
+    """Nudge a stale position forward using velocity + heading, so the
     'look NNE' instruction doesn't go stale between polls."""
     if not aircraft.velocity_ms or not aircraft.heading_deg:
         return aircraft.lat, aircraft.lon
     distance_m = aircraft.velocity_ms * seconds_elapsed
     heading_rad = math.radians(aircraft.heading_deg)
-    r = const.R_earth.value # units: m
+    r = 6371000.0
     lat1 = math.radians(aircraft.lat)
     lon1 = math.radians(aircraft.lon)
     lat2 = math.asin(
@@ -133,20 +139,23 @@ def extrapolate_position(aircraft: Aircraft, seconds_elapsed: float):
     )
     return math.degrees(lat2), math.degrees(lon2)
 
+
 def classify_aircraft(callsign: str):
-    """Classifies aircraft identified""" # TODO add all proper syntax and docs for this
+    """Returns (category, operator_name_or_None)."""
     cs = callsign.strip().upper()
-    for aircraft in military_airline_dict:
-        if re.match(aircraft, cs):
+
+    for pattern in MILITARY_CALLSIGN_PATTERNS:
+        if re.match(pattern, cs):
             return "military", None
 
-    airline_tag = cs[:3]
-    if airline_tag in commercial_airline_dict:
-        return "commercial", commercial_airline_dict[airline_tag]
+    prefix = cs[:3]
+    if prefix in KNOWN_AIRLINE_PREFIXES:
+        return "commercial", KNOWN_AIRLINE_PREFIXES[prefix]
 
-    return "private", None # need to update commercial list
+    return "private", None
 
-def fetch_nearby_aircraft(user_lat, user_lon, radius_km=search_radius_km):
+
+def fetch_nearby_aircraft(user_lat, user_lon, radius_km=SEARCH_RADIUS_KM):
     """Queries OpenSky's bounding-box endpoint. No auth needed for the
     public /states/all endpoint at low request rates, but for anything
     beyond casual personal use, set up OAuth2 client credentials per
@@ -160,7 +169,7 @@ def fetch_nearby_aircraft(user_lat, user_lon, radius_km=search_radius_km):
         "lomin": user_lon - lon_delta,
         "lomax": user_lon + lon_delta,
     }
-    resp = requests.get(opensky_api_url, params=params, timeout=10)
+    resp = requests.get(OPENSKY_STATES_URL, params=params, timeout=10)
     resp.raise_for_status()
     data = resp.json()
 
@@ -178,9 +187,11 @@ def fetch_nearby_aircraft(user_lat, user_lon, radius_km=search_radius_km):
     return aircraft
 
 
-def find_candidates(user_lat, user_lon, user_altitude_m=0.0, seconds_since_fetch=0.0):
-    """Returns candidates sorted best-first (easiest realistic spot first)."""
-    raw_aircraft = fetch_nearby_aircraft(user_lat, user_lon)
+def find_candidates(user_lat, user_lon, user_altitude_m=0.0, seconds_since_fetch=0.0, radius_km=None):
+    """Returns candidates sorted best-first (easiest realistic spot first).
+    radius_km overrides the default search/cutoff distance for this call."""
+    radius_km = radius_km or SEARCH_RADIUS_KM
+    raw_aircraft = fetch_nearby_aircraft(user_lat, user_lon, radius_km=radius_km)
     candidates = []
 
     for ac in raw_aircraft:
@@ -188,30 +199,32 @@ def find_candidates(user_lat, user_lon, user_altitude_m=0.0, seconds_since_fetch
             continue
 
         lat, lon = extrapolate_position(ac, seconds_since_fetch)
-        distance_km = haversine_equation(user_lat, user_lon, lat, lon)
+        distance_km = haversine_km(user_lat, user_lon, lat, lon)
         elevation = elevation_angle_deg(ac.altitude_m, user_altitude_m, distance_km)
 
-        if elevation < min_elevation_deg:
+        if elevation < MIN_ELEVATION_DEG:
+            continue
+        if distance_km > radius_km:
             continue
 
-        bearing = direction_angle(user_lat, user_lon, lat, lon)
+        bearing = bearing_deg(user_lat, user_lon, lat, lon)
         category, operator = classify_aircraft(ac.callsign)
 
         candidates.append(Candidate(
             aircraft=ac, distance_km=distance_km, elevation_deg=elevation,
-            bearing_deg=bearing, compass=angle_to_compass(bearing),
+            bearing_deg=bearing, compass=bearing_to_compass(bearing),
             category=category, operator=operator,
         ))
 
-    # Prefer closer + lower altitude (easier real-world spot), then
-    # higher elevation angle (more overhead) as a tiebreak.
-    candidates.sort(key=lambda c: (c.distance_km + c.aircraft.altitude_m / 1000, -c.elevation_deg))
+    # Distance is now the primary sort key (closest first). Altitude
+    # only breaks ties between similarly-close planes.
+    candidates.sort(key=lambda c: (c.distance_km, c.aircraft.altitude_m))
     return candidates
 
 
 if __name__ == "__main__":
     # Example: London
-    user_lat, user_lon = 51.4751, -0.1131
+    user_lat, user_lon = 51.5074, -0.1278
 
     candidates = find_candidates(user_lat, user_lon)
     if not candidates:
