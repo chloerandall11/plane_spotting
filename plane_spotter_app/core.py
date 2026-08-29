@@ -2,9 +2,9 @@
 Plane spotting app - core logic
 
 Given a user's location, finds the best "overhead" aircraft candidate
-from OpenSky Network data, works out which compass direction to look,
-and classifies the aircraft as commercial / military / private so the
-guessing UI can show the right fields.
+from live ADS-B data (adsb.lol), works out which compass direction to
+look, and classifies the aircraft as commercial / military / private
+so the guessing UI can show the right fields.
 
 Requires: pip install requests --break-system-packages
 """
@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import requests
-
-OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
 
 # Minimum elevation angle (degrees above horizon) to bother suggesting
 # a plane - anything lower is hard to spot and easy to lose in clutter.
@@ -156,33 +154,36 @@ def classify_aircraft(callsign: str):
 
 
 def fetch_nearby_aircraft(user_lat, user_lon, radius_km=SEARCH_RADIUS_KM):
-    """Queries OpenSky's bounding-box endpoint. No auth needed for the
-    public /states/all endpoint at low request rates, but for anything
-    beyond casual personal use, set up OAuth2 client credentials per
-    OpenSky's docs and pass a bearer token here."""
-    lat_delta = radius_km / 111.0
-    lon_delta = radius_km / (111.0 * math.cos(math.radians(user_lat)))
-
-    params = {
-        "lamin": user_lat - lat_delta,
-        "lamax": user_lat + lat_delta,
-        "lomin": user_lon - lon_delta,
-        "lomax": user_lon + lon_delta,
-    }
-    resp = requests.get(OPENSKY_STATES_URL, params=params, timeout=10)
+    """Queries adsb.lol's point-radius endpoint - a free, no-key,
+    community-run ADS-B aggregator (schema-compatible with ADS-B
+    Exchange). Used instead of OpenSky because OpenSky's own docs
+    state they block traffic from AWS and other cloud-hosting IP
+    ranges, which breaks this app when run on free hosts like Render."""
+    radius_nm = min(radius_km * 0.539957, 250)  # adsb.lol caps at 250nm
+    url = f"https://api.adsb.lol/v2/point/{user_lat}/{user_lon}/{radius_nm:.1f}"
+    resp = requests.get(url, timeout=10)
     resp.raise_for_status()
     data = resp.json()
 
     aircraft = []
-    for state in data.get("states", []) or []:
-        icao24, callsign = state[0], (state[1] or "").strip()
-        lon, lat, baro_alt = state[5], state[6], state[7]
-        velocity, heading = state[9], state[10]
-        if lat is None or lon is None or not callsign:
+    for state in data.get("ac", []) or []:
+        icao24 = state.get("hex")
+        callsign = (state.get("flight") or "").strip()
+        lat, lon = state.get("lat"), state.get("lon")
+        alt_baro = state.get("alt_baro")  # feet, or the string "ground"
+        gs = state.get("gs")              # ground speed, knots
+        track = state.get("track")        # true heading, degrees
+
+        if lat is None or lon is None or not icao24 or not callsign:
             continue
+        if alt_baro is None or alt_baro == "ground":
+            continue  # aircraft on the ground isn't something to spot overhead
+
         aircraft.append(Aircraft(
             icao24=icao24, callsign=callsign, lat=lat, lon=lon,
-            altitude_m=baro_alt, velocity_ms=velocity, heading_deg=heading,
+            altitude_m=float(alt_baro) * 0.3048,
+            velocity_ms=float(gs) * 0.514444 if gs is not None else None,
+            heading_deg=float(track) if track is not None else None,
         ))
     return aircraft
 
