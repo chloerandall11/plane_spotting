@@ -67,6 +67,13 @@
     color: var(--phosphor); cursor: pointer; text-decoration: underline;
     text-underline-offset: 2px;
   }
+  .candidate-list { border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+  .candidate-item {
+    padding: 12px; font-size: 14px; cursor: pointer;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .candidate-item:last-child { border-bottom: none; }
+  .candidate-item:hover { background: var(--panel-raised); color: var(--phosphor); }
   .radius-control .val { color: var(--amber); min-width: 52px; text-align: right; }
 
   .card {
@@ -250,7 +257,7 @@ let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v9 (manual start button, no auto-scan on load)');
+console.log('plane spotter frontend: v11 (UK-biased geocoding + disambiguation)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
@@ -610,10 +617,13 @@ async function submitPostcode() {
     const res = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`);
     if (!res.ok) throw new Error('not found');
     const data = await res.json();
-    userLat = data.lat; userLon = data.lon;
-    locationMode = 'manual'; manualLabel = data.label;
-    updateLocationLabel();
-    if (started) { fetchNext(); } else { stage = 'idle'; render(); }
+    const candidates = data.candidates || [];
+    if (!candidates.length) throw new Error('not found');
+    if (candidates.length === 1) {
+      applyLocation(candidates[0]);
+    } else {
+      showCandidatePicker(candidates);
+    }
   } catch (e) {
     document.getElementById('spotView').innerHTML = `
       <div class="card status">
@@ -623,6 +633,33 @@ async function submitPostcode() {
         </div>
       </div>`;
   }
+}
+
+function showCandidatePicker(candidates) {
+  const rows = candidates.map((c, i) =>
+    `<div class="candidate-item" onclick="pickCandidate(${i})">${c.label}</div>`
+  ).join('');
+  window._geocodeCandidates = candidates; // stash for pickCandidate
+  document.getElementById('spotView').innerHTML = `
+    <div class="card">
+      <label>Which one did you mean?</label>
+      <div class="candidate-list">${rows}</div>
+      <div class="row" style="margin-top:14px;">
+        <button onclick="showPostcodeInput()">try a different search</button>
+      </div>
+    </div>`;
+}
+
+function pickCandidate(index) {
+  const c = (window._geocodeCandidates || [])[index];
+  if (c) applyLocation(c);
+}
+
+function applyLocation(c) {
+  userLat = c.lat; userLon = c.lon;
+  locationMode = 'manual'; manualLabel = c.label;
+  updateLocationLabel();
+  if (started) { fetchNext(); } else { stage = 'idle'; render(); }
 }
 
 async function skip() {

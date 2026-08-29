@@ -328,7 +328,11 @@ def api_reference_data():
 
 
 def try_postcodes_io(clean_query):
-    """Handles UK postcodes: full ('SW1A1AA') or partial/outcode ('TR8')."""
+    """Handles UK postcodes: full ('SW1A1AA') or partial/outcode ('TR8').
+    Also handles bare central-London-style codes like 'SW1' or 'EC1',
+    which aren't valid outcodes on their own - they need the extra
+    district letter (SW1A, EC1A etc) that postcodes.io's plain
+    /outcodes/ lookup won't guess for you."""
     try:
         resp = requests.get(f"https://api.postcodes.io/postcodes/{clean_query}", timeout=6)
         if resp.ok:
@@ -347,30 +351,54 @@ def try_postcodes_io(clean_query):
     except requests.RequestException as e:
         print(f"[geocode] postcodes.io outcode lookup failed: {e}")
 
+    # Bare area+district with no letter (e.g. "SW1", "EC1", "WC1") -
+    # try the common central-London district-letter suffixes.
+    if re.fullmatch(r"[A-Z]{1,2}\d{1,2}", clean_query.upper()):
+        for suffix in "AEHPVWXY":
+            try:
+                candidate = f"{clean_query.upper()}{suffix}"
+                resp = requests.get(f"https://api.postcodes.io/outcodes/{candidate}", timeout=6)
+                if resp.ok:
+                    result = resp.json().get("result")
+                    if result:
+                        return result["latitude"], result["longitude"], f"{clean_query.upper()} area, London"
+            except requests.RequestException:
+                continue
+
     return None
 
 
-def try_open_meteo(query):
+def try_open_meteo(query, count=5):
     """General place-name/city geocoding. Free, no key, and - unlike
     Nominatim - doesn't block requests from cloud-hosting IPs like
-    Render's, which is what most free hosts run on."""
+    Render's. Returns several candidates (UK results sorted first,
+    since that's most likely what's meant) rather than silently
+    guessing one - a short query like a place name can easily match
+    somewhere on the other side of the world."""
     try:
         resp = requests.get(
             "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": query, "count": 1},
+            params={"name": query, "count": count},
             timeout=6,
         )
         if resp.ok:
-            results = resp.json().get("results")
-            if results:
-                r = results[0]
+            results = resp.json().get("results") or []
+            candidates = []
+            for r in results:
                 label = r.get("name", query)
+                if r.get("admin1") and r["admin1"] != label:
+                    label += f", {r['admin1']}"
                 if r.get("country"):
-                    label = f"{label}, {r['country']}"
-                return r["latitude"], r["longitude"], label
+                    label += f" ({r['country']})"
+                candidates.append({
+                    "lat": r["latitude"], "lon": r["longitude"], "label": label,
+                    "is_uk": r.get("country_code") == "GB",
+                })
+            candidates.sort(key=lambda c: 0 if c["is_uk"] else 1)
+            return candidates
     except requests.RequestException as e:
         print(f"[geocode] open-meteo lookup failed: {e}")
-    return None
+    return []
 
 
 @app.route("/api/geocode")
@@ -379,17 +407,20 @@ def api_geocode():
     if not query:
         return jsonify({"error": "empty query"}), 400
 
+    # A UK postcode/outcode match is unambiguous - return it directly.
     hit = try_postcodes_io(query.replace(" ", ""))
-    source = "postcodes.io"
-    if not hit:
-        hit = try_open_meteo(query)
-        source = "open-meteo"
+    if hit:
+        lat, lon, label = hit
+        return jsonify({"candidates": [{"lat": lat, "lon": lon, "label": label}]})
 
-    if not hit:
-        return jsonify({"error": "not found"}), 404
-
-    lat, lon, label = hit
-    return jsonify({"lat": lat, "lon": lon, "label": label, "source": source})
+    # Otherwise it's a place name - could match multiple places
+    # worldwide, so return several (UK first) and let the user confirm.
+    candidates = try_open_meteo(query)
+    if not candidates:
+        return jsonify({"candidates": []}), 404
+    return jsonify({"candidates": [
+        {"lat": c["lat"], "lon": c["lon"], "label": c["label"]} for c in candidates
+    ]})
 
 
 @app.route("/")
@@ -509,6 +540,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v10 (comprehensive airline recognition via adsbdb) <<<")
+    print(">>> plane spotter backend: v11 (UK-biased geocoding + disambiguation) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
