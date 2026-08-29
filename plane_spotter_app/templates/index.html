@@ -58,6 +58,15 @@
   .radius-control input[type=range] {
     flex: 1; accent-color: var(--phosphor); height: 4px;
   }
+  .location-row {
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .location-row #locationLabel { color: var(--amber); }
+  .link-btn {
+    color: var(--phosphor); cursor: pointer; text-decoration: underline;
+    text-underline-offset: 2px;
+  }
   .radius-control .val { color: var(--amber); min-width: 52px; text-align: right; }
 
   .card {
@@ -218,6 +227,11 @@
     <span class="val" id="radiusVal">15 km</span>
   </div>
 
+  <div class="location-row">
+    location: <span id="locationLabel">device GPS</span>
+    <span class="link-btn" onclick="showPostcodeInput()">change</span>
+  </div>
+
   <div class="tabbar">
     <button id="tabSpot" class="active" onclick="showTab('spot')">Spot</button>
     <button id="tabHistory" onclick="showTab('history')">Log</button>
@@ -235,7 +249,7 @@ let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v6 (full airports, live distance, guess coloring, HQ photos)');
+console.log('plane spotter frontend: v7 (postcode geocoding, clearer errors)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
@@ -507,18 +521,92 @@ async function getLocation() {
   });
 }
 
+let locationMode = 'gps'; // 'gps' | 'manual'
+let manualLabel = null;
+
 async function fetchNext() {
   stage = "loading"; render();
+
+  if (userLat === null && locationMode === 'gps') {
+    try {
+      [userLat, userLon] = await getLocation();
+    } catch (e) {
+      showLocationError('gps');
+      return;
+    }
+  }
+
   try {
-    if (userLat === null) [userLat, userLon] = await getLocation();
     const res = await fetch(`/api/next?lat=${userLat}&lon=${userLon}&radius=${radiusKm}`);
+    if (!res.ok) throw new Error('backend');
     const data = await res.json();
     if (!data.found) { stage = "none"; render(); return; }
     currentCandidate = data;
     stage = "prompt"; render();
   } catch (e) {
-    document.getElementById('spotView').innerHTML =
-      `<div class="card status">couldn't get your location &mdash; allow location access and reload</div>`;
+    showLocationError('backend');
+  }
+}
+
+function showLocationError(kind) {
+  const msg = kind === 'gps'
+    ? "couldn't get your phone's location &mdash; check location permission is allowed for this app"
+    : "couldn't reach the server &mdash; if you just opened this after a while, it may still be waking up. Try again in a moment.";
+  document.getElementById('spotView').innerHTML = `
+    <div class="card status">
+      ${msg}
+      <div class="row" style="margin-top:14px;">
+        <button onclick="fetchNext()">try again</button>
+        <button class="primary" onclick="showPostcodeInput()">use postcode instead</button>
+      </div>
+    </div>`;
+}
+
+function showPostcodeInput() {
+  document.getElementById('spotView').innerHTML = `
+    <div class="card">
+      <label>Postcode or place name</label>
+      <input id="postcodeInput" placeholder="e.g. TR8 4RS or Newquay" autocomplete="off">
+      <div class="row" style="margin-top:4px;">
+        <button onclick="useGPS()">use GPS instead</button>
+        <button class="primary" onclick="submitPostcode()">go</button>
+      </div>
+    </div>`;
+  document.getElementById('postcodeInput').focus();
+}
+
+function updateLocationLabel() {
+  const el = document.getElementById('locationLabel');
+  if (!el) return;
+  el.textContent = locationMode === 'manual' ? (manualLabel || 'custom location') : 'device GPS';
+}
+
+function useGPS() {
+  locationMode = 'gps'; manualLabel = null; userLat = null; userLon = null;
+  updateLocationLabel();
+  fetchNext();
+}
+
+async function submitPostcode() {
+  const query = document.getElementById('postcodeInput')?.value?.trim();
+  if (!query) return;
+  stage = "loading"; render();
+  try {
+    const res = await fetch(`/api/geocode?query=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error('not found');
+    const data = await res.json();
+    userLat = data.lat; userLon = data.lon;
+    locationMode = 'manual'; manualLabel = data.label;
+    updateLocationLabel();
+    fetchNext();
+  } catch (e) {
+    document.getElementById('spotView').innerHTML = `
+      <div class="card status">
+        couldn't find that postcode/place &mdash; try a different spelling
+        <div class="row" style="margin-top:14px;">
+          <button class="primary" onclick="showPostcodeInput()">try again</button>
+        </div>
+      </div>`;
   }
 }
 

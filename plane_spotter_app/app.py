@@ -283,6 +283,71 @@ def api_reference_data():
     return jsonify({"airlines": airlines, "airports": airports, "aircraft_types": aircraft_types})
 
 
+def try_postcodes_io(clean_query):
+    """Handles UK postcodes: full ('SW1A1AA') or partial/outcode ('TR8')."""
+    try:
+        resp = requests.get(f"https://api.postcodes.io/postcodes/{clean_query}", timeout=6)
+        if resp.ok:
+            result = resp.json().get("result")
+            if result:
+                return result["latitude"], result["longitude"], result.get("postcode", clean_query)
+    except requests.RequestException as e:
+        print(f"[geocode] postcodes.io full lookup failed: {e}")
+
+    try:
+        resp = requests.get(f"https://api.postcodes.io/outcodes/{clean_query}", timeout=6)
+        if resp.ok:
+            result = resp.json().get("result")
+            if result:
+                return result["latitude"], result["longitude"], result.get("outcode", clean_query)
+    except requests.RequestException as e:
+        print(f"[geocode] postcodes.io outcode lookup failed: {e}")
+
+    return None
+
+
+def try_open_meteo(query):
+    """General place-name/city geocoding. Free, no key, and - unlike
+    Nominatim - doesn't block requests from cloud-hosting IPs like
+    Render's, which is what most free hosts run on."""
+    try:
+        resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": query, "count": 1},
+            timeout=6,
+        )
+        if resp.ok:
+            results = resp.json().get("results")
+            if results:
+                r = results[0]
+                label = r.get("name", query)
+                if r.get("country"):
+                    label = f"{label}, {r['country']}"
+                return r["latitude"], r["longitude"], label
+    except requests.RequestException as e:
+        print(f"[geocode] open-meteo lookup failed: {e}")
+    return None
+
+
+@app.route("/api/geocode")
+def api_geocode():
+    query = (request.args.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "empty query"}), 400
+
+    hit = try_postcodes_io(query.replace(" ", ""))
+    source = "postcodes.io"
+    if not hit:
+        hit = try_open_meteo(query)
+        source = "open-meteo"
+
+    if not hit:
+        return jsonify({"error": "not found"}), 404
+
+    lat, lon, label = hit
+    return jsonify({"lat": lat, "lon": lon, "label": label, "source": source})
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -400,6 +465,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v6 (full airports, live distance, guess coloring, HQ photos) <<<")
+    print(">>> plane spotter backend: v8 (fixed geocoding - postcodes.io outcodes + open-meteo) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
