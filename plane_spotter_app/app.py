@@ -36,6 +36,7 @@ OURAIRPORTS_CSV_URL = "https://ourairports.com/data/airports.csv"
 # aircraft/callsign repeatedly in one session.
 AIRCRAFT_TYPE_CACHE = {}
 ROUTE_CACHE = {}
+AIRLINE_CACHE = {}
 
 # Single-user, in-memory session state: the last fetched candidate
 # list and where we are in it. Fine for one person using this on
@@ -214,9 +215,51 @@ def save_history(entries):
         json.dump(entries, f, indent=2)
 
 
+def lookup_airline(icao_prefix):
+    """Looks up an airline by its 3-letter ICAO designator against
+    adsbdb's airline database - which covers essentially every active
+    commercial carrier worldwide (mainline, regional, and low-cost
+    subsidiaries), unlike our small local KNOWN_AIRLINE_PREFIXES list.
+    Returns the airline name, or None if not found."""
+    if not icao_prefix:
+        return None
+    if icao_prefix in AIRLINE_CACHE:
+        return AIRLINE_CACHE[icao_prefix]
+    result = None
+    try:
+        resp = requests.get(f"{ADSBDB_BASE}/airline/{icao_prefix}", timeout=5)
+        if resp.ok:
+            entries = resp.json().get("response")
+            if entries:
+                result = entries[0].get("name")
+    except requests.RequestException as e:
+        print(f"[airline] lookup failed for {icao_prefix}: {e}")
+    AIRLINE_CACHE[icao_prefix] = result
+    return result
+
+
+def ensure_commercial_classification(c: "core.Candidate"):
+    """core.classify_aircraft() only checks a small local airline list
+    and military callsign patterns - fine for military detection, but
+    it'll miss most real-world carriers (regional subsidiaries, cargo
+    divisions, less common airlines etc). If the local pass didn't
+    resolve an operator and it's not military, this upgrades the
+    classification using adsbdb's full airline database before the
+    candidate is shown to the user."""
+    if c.category == "military" or c.operator:
+        return c
+    prefix = c.aircraft.callsign.strip().upper()[:3]
+    name = lookup_airline(prefix)
+    if name:
+        c.category = "commercial"
+        c.operator = name
+    return c
+
+
 def candidate_public_view(c: "core.Candidate"):
     """What the client is allowed to see BEFORE revealing - no
     callsign/airline, just enough to go find it in the sky."""
+    c = ensure_commercial_classification(c)
     return {
         "compass": c.compass,
         "bearing_deg": round(c.bearing_deg),
@@ -227,6 +270,7 @@ def candidate_public_view(c: "core.Candidate"):
 
 
 def candidate_reveal_view(c: "core.Candidate"):
+    c = ensure_commercial_classification(c)
     speed_mph = round(c.aircraft.velocity_ms * 2.23694) if c.aircraft.velocity_ms else None
     heading_deg = round(c.aircraft.heading_deg) if c.aircraft.heading_deg is not None else None
     aircraft_info = lookup_aircraft_info(c.aircraft.icao24)
@@ -465,6 +509,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v9 (switched to adsb.lol - OpenSky blocks cloud hosts) <<<")
+    print(">>> plane spotter backend: v10 (comprehensive airline recognition via adsbdb) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
