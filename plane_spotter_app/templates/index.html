@@ -243,19 +243,21 @@
 <script>
 let userLat = null, userLon = null;
 let currentCandidate = null;
-let stage = "prompt";
+let stage = "idle"; // idle | loading | prompt | guess | reveal | none
+let started = false;
 let deviceHeading = null;
 let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v7 (postcode geocoding, clearer errors)');
+console.log('plane spotter frontend: v9 (manual start button, no auto-scan on load)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
 function onRadiusInput(val) {
   radiusKm = Number(val);
   document.getElementById('radiusVal').textContent = radiusKm + ' km';
+  if (!started) return; // don't kick off a scan just from adjusting the slider before starting
   clearTimeout(radiusDebounce);
   radiusDebounce = setTimeout(() => { fetchNext(); }, 500);
 }
@@ -396,7 +398,15 @@ function silhouetteMarkup(category) {
 
 function render() {
   const el = document.getElementById('spotView');
-  if (stage === "loading") {
+  if (stage === "idle") {
+    el.innerHTML = `
+      <div class="card status">
+        set your radius and location above, then start scanning when you're ready
+        <div class="row" style="margin-top:14px;">
+          <button class="primary" style="flex:1;" onclick="startScanning()">start scanning</button>
+        </div>
+      </div>`;
+  } else if (stage === "loading") {
     el.innerHTML = `<div class="card"><div class="sweep-wrap">
       <div class="sweep"></div><div class="sweep-label">scanning nearby traffic&hellip;</div>
     </div></div>`;
@@ -581,10 +591,15 @@ function updateLocationLabel() {
   el.textContent = locationMode === 'manual' ? (manualLabel || 'custom location') : 'device GPS';
 }
 
+function startScanning() {
+  started = true;
+  fetchNext();
+}
+
 function useGPS() {
   locationMode = 'gps'; manualLabel = null; userLat = null; userLon = null;
   updateLocationLabel();
-  fetchNext();
+  if (started) { fetchNext(); } else { stage = 'idle'; render(); }
 }
 
 async function submitPostcode() {
@@ -598,7 +613,7 @@ async function submitPostcode() {
     userLat = data.lat; userLon = data.lon;
     locationMode = 'manual'; manualLabel = data.label;
     updateLocationLabel();
-    fetchNext();
+    if (started) { fetchNext(); } else { stage = 'idle'; render(); }
   } catch (e) {
     document.getElementById('spotView').innerHTML = `
       <div class="card status">
@@ -675,7 +690,7 @@ async function deleteHistoryEntry(id) {
   loadHistory(activeFilter);
 }
 
-fetchNext();
+render();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
