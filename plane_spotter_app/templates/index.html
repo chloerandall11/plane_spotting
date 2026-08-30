@@ -74,6 +74,16 @@
   }
   .candidate-item:last-child { border-bottom: none; }
   .candidate-item:hover { background: var(--panel-raised); color: var(--phosphor); }
+
+  .aircraft-list { border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+  .aircraft-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px; cursor: pointer; border-bottom: 1px solid var(--hairline);
+  }
+  .aircraft-item:last-child { border-bottom: none; }
+  .aircraft-item:hover { background: var(--panel-raised); }
+  .aircraft-type { font-family: var(--sans); font-size: 14px; color: var(--text); margin-bottom: 2px; }
+  .aircraft-sub { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
   .radius-control .val { color: var(--amber); min-width: 52px; text-align: right; }
 
   .card {
@@ -161,6 +171,20 @@
     animation: rotate 1.6s linear infinite; opacity: 0.55;
   }
   @keyframes rotate { to { transform: rotate(360deg); } }
+  .sweep.amber { border-color: var(--amber-dim); overflow: visible; }
+  .sweep.amber::after {
+    background: none;
+    box-shadow: none;
+  }
+  .sweep.amber::before {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid var(--amber); opacity: 0;
+    animation: pulse-fill 1.6s ease-out infinite;
+  }
+  @keyframes pulse-fill {
+    0% { transform: scale(0.4); opacity: 0.9; }
+    100% { transform: scale(1.15); opacity: 0; }
+  }
   .sweep-label { font-family: var(--mono); font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
 
   /* --- Reveal breakdown --- */
@@ -188,6 +212,12 @@
     background: var(--bg); border-left: 2px solid var(--phosphor-dim);
     padding: 10px 14px; border-radius: 0 3px 3px 0; margin-bottom: 18px;
   }
+  .path-wrap {
+    background: var(--bg); border: 1px solid var(--hairline); border-radius: 3px;
+    padding: 8px; margin: -8px 0 14px; display: flex; justify-content: center;
+  }
+  .flight-path { width: 100%; max-width: 320px; height: auto; }
+  .path-label { font-family: var(--mono); font-size: 9px; fill: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
   .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
   .data-cell { background: var(--panel); padding: 10px 12px; }
   .data-cell.wide { grid-column: 1 / -1; }
@@ -250,14 +280,14 @@
 <script>
 let userLat = null, userLon = null;
 let currentCandidate = null;
-let stage = "idle"; // idle | loading | prompt | guess | reveal | none
+let stage = "idle"; // idle | loading | picker | prompt | guess | revealing | reveal | none
 let started = false;
 let deviceHeading = null;
 let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v11 (UK-biased geocoding + disambiguation)');
+console.log('plane spotter frontend: v14 (flight path visual)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
@@ -266,7 +296,7 @@ function onRadiusInput(val) {
   document.getElementById('radiusVal').textContent = radiusKm + ' km';
   if (!started) return; // don't kick off a scan just from adjusting the slider before starting
   clearTimeout(radiusDebounce);
-  radiusDebounce = setTimeout(() => { fetchNext(); }, 500);
+  radiusDebounce = setTimeout(() => { loadAircraftList(); }, 500);
 }
 
 function showTab(tab) {
@@ -392,6 +422,42 @@ async function enableCompass() {
 }
 
 /* ---------- rendering ---------- */
+function flightPathSVG(origin, destination, current) {
+  if (!origin || !destination) return null;
+
+  const pts = [origin, destination, current];
+  const lats = pts.map(p => p.lat), lons = pts.map(p => p.lon);
+  const latMin = Math.min(...lats), latMax = Math.max(...lats);
+  const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
+  const latSpan = Math.max(latMax - latMin, 0.5);
+  const lonSpan = Math.max(lonMax - lonMin, 0.5);
+
+  const W = 320, H = 180, pad = 28;
+  const project = (p) => {
+    const x = pad + ((p.lon - lonMin) / lonSpan) * (W - pad * 2);
+    const y = pad + (1 - (p.lat - latMin) / latSpan) * (H - pad * 2); // lat flips (north = up)
+    return [x, y];
+  };
+
+  const [ox, oy] = project(origin);
+  const [dx, dy] = project(destination);
+  const [cx, cy] = project(current);
+
+  // slight bow in the route line, just for visual interest - not a real great-circle
+  const mx = (ox + dx) / 2, my = (oy + dy) / 2 - 14;
+
+  return `
+    <svg class="flight-path" viewBox="0 0 ${W} ${H}">
+      <path d="M ${ox} ${oy} Q ${mx} ${my} ${dx} ${dy}" fill="none"
+            stroke="var(--text-dim)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <circle cx="${ox}" cy="${oy}" r="4" fill="var(--amber)"/>
+      <circle cx="${dx}" cy="${dy}" r="4" fill="var(--amber)"/>
+      <circle cx="${cx}" cy="${cy}" r="5" fill="var(--phosphor)" filter="drop-shadow(0 0 4px var(--phosphor))"/>
+      <text x="${ox}" y="${oy - 10}" class="path-label" text-anchor="middle">origin</text>
+      <text x="${dx}" y="${dy - 10}" class="path-label" text-anchor="middle">destination</text>
+    </svg>`;
+}
+
 function silhouetteMarkup(category) {
   if (category === 'military') {
     return `<svg viewBox="0 0 120 60" class="silhouette">
@@ -414,12 +480,27 @@ function render() {
         </div>
       </div>`;
   } else if (stage === "loading") {
+    const locBit = locationMode === 'manual' ? (manualLabel || 'your chosen location') : 'your location';
     el.innerHTML = `<div class="card"><div class="sweep-wrap">
-      <div class="sweep"></div><div class="sweep-label">scanning nearby traffic&hellip;</div>
+      <div class="sweep"></div>
+      <div class="sweep-label">scanning ${radiusKm}km around ${locBit}&hellip;</div>
+    </div></div>`;
+  } else if (stage === "revealing") {
+    el.innerHTML = `<div class="card"><div class="sweep-wrap">
+      <div class="sweep amber"></div>
+      <div class="sweep-label">pulling up the details&hellip;</div>
     </div></div>`;
   } else if (stage === "none") {
-    el.innerHTML = `<div class="card status">nothing within ${radiusKm}km right now<br><br>
-      <button class="primary" onclick="fetchNext()">scan again</button></div>`;
+    const locBit = locationMode === 'manual' ? (manualLabel || 'that location') : 'your location';
+    el.innerHTML = `
+      <div class="card status">
+        no traffic within ${radiusKm}km of ${locBit} right now.<br>
+        <span style="color:var(--text-dim);font-size:12px;">try a wider radius, or check back in a bit &mdash; the sky isn't always busy.</span>
+        <div class="row" style="margin-top:16px;">
+          <button onclick="widenAndScan()">widen radius</button>
+          <button class="primary" onclick="loadAircraftList()">scan again</button>
+        </div>
+      </div>`;
   } else if (stage === "prompt") {
     const c = currentCandidate;
     const needCompassPrompt = !compassActive;
@@ -439,10 +520,27 @@ function render() {
         </div>` : ""}
       </div>
       <div class="row">
-        <button onclick="skip()">skip</button>
+        <button onclick="loadAircraftList()">choose another</button>
         <button class="primary" onclick="goGuess()">I see it</button>
       </div>`;
     updateRoseOrientation();
+  } else if (stage === "picker") {
+    const rows = aircraftList.map(a => `
+      <div class="aircraft-item" onclick="pickAircraft(${a.index})">
+        <div class="aircraft-main">
+          <div class="aircraft-type">${a.aircraft_type || 'unknown type'}</div>
+          <div class="aircraft-sub">${a.distance_km} km &middot; ${a.altitude_ft.toLocaleString()} ft &middot; look ${a.compass}</div>
+        </div>
+        <span class="badge">${a.category_hint}</span>
+      </div>`).join('');
+    el.innerHTML = `
+      <div class="card">
+        <div class="readout-sub" style="text-align:left;margin-bottom:12px;">${aircraftList.length} in range &mdash; tap the one you're looking at</div>
+        <div class="aircraft-list">${rows}</div>
+      </div>
+      <div class="row">
+        <button style="flex:1;" onclick="loadAircraftList()">rescan</button>
+      </div>`;
   } else if (stage === "guess") {
     const showRoute = currentCandidate.category_hint === "commercial";
     el.innerHTML = `
@@ -505,6 +603,7 @@ function render() {
       'Destination': 'destination',
     };
     const guessResult = currentCandidate.guessResult || {};
+    const pathSVG = flightPathSVG(r.origin_coords, r.destination_coords, r.current_coords);
     el.innerHTML = `
       <div class="card">
         <div class="photo-wrap">
@@ -516,6 +615,7 @@ function render() {
         <div class="operator-line">${r.operator || 'operator unknown'}</div>
         ${routeLine ? `<div class="route-line">${routeLine}</div>` : ""}
         <div class="comment">${currentCandidate.comment}</div>
+        ${pathSVG ? `<div class="path-wrap">${pathSVG}</div>` : ""}
         <div class="data-grid">
           ${cells.map(([k, v]) => {
             const resultKey = resultKeyByLabel[k];
@@ -525,7 +625,7 @@ function render() {
           }).join('')}
         </div>
       </div>
-      <button class="primary" style="width:100%;" onclick="fetchNext()">spot another</button>`;
+      <button class="primary" style="width:100%;" onclick="loadAircraftList()">spot another</button>`;
   }
 }
 
@@ -540,8 +640,9 @@ async function getLocation() {
 
 let locationMode = 'gps'; // 'gps' | 'manual'
 let manualLabel = null;
+let aircraftList = [];
 
-async function fetchNext() {
+async function loadAircraftList() {
   stage = "loading"; render();
 
   if (userLat === null && locationMode === 'gps') {
@@ -554,8 +655,25 @@ async function fetchNext() {
   }
 
   try {
-    const res = await fetch(`/api/next?lat=${userLat}&lon=${userLon}&radius=${radiusKm}`);
+    const res = await fetch(`/api/candidates?lat=${userLat}&lon=${userLon}&radius=${radiusKm}`);
     if (!res.ok) throw new Error('backend');
+    const data = await res.json();
+    aircraftList = data.candidates || [];
+    if (!aircraftList.length) { stage = "none"; render(); return; }
+    stage = "picker"; render();
+  } catch (e) {
+    showLocationError('backend');
+  }
+}
+
+async function pickAircraft(index) {
+  stage = "loading"; render();
+  try {
+    const res = await fetch('/api/select', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index }),
+    });
+    if (!res.ok) throw new Error('select failed');
     const data = await res.json();
     if (!data.found) { stage = "none"; render(); return; }
     currentCandidate = data;
@@ -573,7 +691,7 @@ function showLocationError(kind) {
     <div class="card status">
       ${msg}
       <div class="row" style="margin-top:14px;">
-        <button onclick="fetchNext()">try again</button>
+        <button onclick="loadAircraftList()">try again</button>
         <button class="primary" onclick="showPostcodeInput()">use postcode instead</button>
       </div>
     </div>`;
@@ -598,15 +716,22 @@ function updateLocationLabel() {
   el.textContent = locationMode === 'manual' ? (manualLabel || 'custom location') : 'device GPS';
 }
 
+function widenAndScan() {
+  radiusKm = Math.min(radiusKm + 15, 60);
+  document.getElementById('radiusSlider').value = radiusKm;
+  document.getElementById('radiusVal').textContent = radiusKm + ' km';
+  loadAircraftList();
+}
+
 function startScanning() {
   started = true;
-  fetchNext();
+  loadAircraftList();
 }
 
 function useGPS() {
   locationMode = 'gps'; manualLabel = null; userLat = null; userLon = null;
   updateLocationLabel();
-  if (started) { fetchNext(); } else { stage = 'idle'; render(); }
+  if (started) { loadAircraftList(); } else { stage = 'idle'; render(); }
 }
 
 async function submitPostcode() {
@@ -622,7 +747,7 @@ async function submitPostcode() {
     if (candidates.length === 1) {
       applyLocation(candidates[0]);
     } else {
-      showCandidatePicker(candidates);
+      showLocationPicker(candidates);
     }
   } catch (e) {
     document.getElementById('spotView').innerHTML = `
@@ -635,11 +760,11 @@ async function submitPostcode() {
   }
 }
 
-function showCandidatePicker(candidates) {
+function showLocationPicker(candidates) {
   const rows = candidates.map((c, i) =>
-    `<div class="candidate-item" onclick="pickCandidate(${i})">${c.label}</div>`
+    `<div class="candidate-item" onclick="pickLocationCandidate(${i})">${c.label}</div>`
   ).join('');
-  window._geocodeCandidates = candidates; // stash for pickCandidate
+  window._geocodeCandidates = candidates; // stash for pickLocationCandidate
   document.getElementById('spotView').innerHTML = `
     <div class="card">
       <label>Which one did you mean?</label>
@@ -650,7 +775,7 @@ function showCandidatePicker(candidates) {
     </div>`;
 }
 
-function pickCandidate(index) {
+function pickLocationCandidate(index) {
   const c = (window._geocodeCandidates || [])[index];
   if (c) applyLocation(c);
 }
@@ -659,16 +784,7 @@ function applyLocation(c) {
   userLat = c.lat; userLon = c.lon;
   locationMode = 'manual'; manualLabel = c.label;
   updateLocationLabel();
-  if (started) { fetchNext(); } else { stage = 'idle'; render(); }
-}
-
-async function skip() {
-  stage = "loading"; render();
-  const res = await fetch('/api/skip', { method: 'POST' });
-  const data = await res.json();
-  if (!data.found) { stage = "none"; render(); return; }
-  currentCandidate = data;
-  stage = "prompt"; render();
+  if (started) { loadAircraftList(); } else { stage = 'idle'; render(); }
 }
 
 function goGuess() { stage = "guess"; render(); }
@@ -680,7 +796,7 @@ async function reveal(lostSight) {
     origin: document.getElementById('gOrigin')?.value || "",
     destination: document.getElementById('gDest')?.value || "",
   };
-  stage = "loading"; render();
+  stage = "revealing"; render();
   const res = await fetch('/api/reveal', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ guess, lost_sight: lostSight }),

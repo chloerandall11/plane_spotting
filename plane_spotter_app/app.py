@@ -43,12 +43,14 @@ AIRLINE_CACHE = {}
 # their own phone - not built for multiple concurrent users.
 SESSION = {
     "candidates": [],
-    "index": 0,
+    "selected_index": None,
     "fetched_at": 0.0,
     "user_lat": None,
     "user_lon": None,
     "radius_km": core.SEARCH_RADIUS_KM,
 }
+
+MAX_CANDIDATES_LISTED = 12
 
 CASUAL_COMMENTS = {
     "correct": [
@@ -98,8 +100,10 @@ def lookup_aircraft_info(icao24):
 
 
 def lookup_route(callsign):
-    """Returns {'origin': str, 'destination': str} or None if unknown.
-    Each value is formatted as 'Airport Name (Country)'. Only reliable
+    """Returns {'origin': str, 'destination': str, 'origin_coords': {...},
+    'destination_coords': {...}} or None if unknown. Display strings are
+    'Airport Name (Country)'; coords (when present) are real lat/lon from
+    adsbdb's airport data, used to draw the flight path. Only reliable
     for scheduled commercial flights - adsbdb's route data comes from
     published schedules, not live ADS-B."""
     key = callsign.strip().upper()
@@ -119,9 +123,20 @@ def lookup_route(callsign):
                     if name and country:
                         return f"{name} ({country})"
                     return name
+
+                def coords(a):
+                    if not a:
+                        return None
+                    lat, lon = a.get("latitude"), a.get("longitude")
+                    if lat is None or lon is None:
+                        return None
+                    return {"lat": lat, "lon": lon}
+
                 result = {
                     "origin": fmt_airport(route.get("origin")),
                     "destination": fmt_airport(route.get("destination")),
+                    "origin_coords": coords(route.get("origin")),
+                    "destination_coords": coords(route.get("destination")),
                 }
     except requests.RequestException:
         pass
@@ -285,6 +300,9 @@ def candidate_reveal_view(c: "core.Candidate"):
         "photo_thumb": aircraft_info["photo_thumb"],
         "origin": route["origin"] if route else None,
         "destination": route["destination"] if route else None,
+        "origin_coords": route["origin_coords"] if route else None,
+        "destination_coords": route["destination_coords"] if route else None,
+        "current_coords": {"lat": c.aircraft.lat, "lon": c.aircraft.lon},
         "altitude_ft": round(c.aircraft.altitude_m * 3.28084),
         "distance_km": round(c.distance_km, 1),
         "speed_mph": speed_mph,
@@ -428,13 +446,8 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/api/next")
-def api_next():
-    lat = float(request.args.get("lat"))
-    lon = float(request.args.get("lon"))
-    radius_km = float(request.args.get("radius", core.SEARCH_RADIUS_KM))
+def ensure_session_candidates(lat, lon, radius_km):
     now = time.time()
-
     stale = (
         (now - SESSION["fetched_at"]) > 20
         or SESSION["user_lat"] != lat
@@ -442,30 +455,50 @@ def api_next():
     )
     if stale or not SESSION["candidates"]:
         SESSION["candidates"] = core.find_candidates(lat, lon, radius_km=radius_km)
-        SESSION["index"] = 0
         SESSION["fetched_at"] = now
         SESSION["user_lat"] = lat
         SESSION["user_lon"] = lon
         SESSION["radius_km"] = radius_km
+        SESSION["selected_index"] = None
+    return SESSION["candidates"]
 
+
+@app.route("/api/candidates")
+def api_candidates():
+    lat = float(request.args.get("lat"))
+    lon = float(request.args.get("lon"))
+    radius_km = float(request.args.get("radius", core.SEARCH_RADIUS_KM))
+    candidates = ensure_session_candidates(lat, lon, radius_km)
+
+    seconds_elapsed = time.time() - SESSION["fetched_at"]
+    out = []
+    for i, c in enumerate(candidates[:MAX_CANDIDATES_LISTED]):
+        c = core.refresh_candidate(c, lat, lon, 0.0, seconds_elapsed)
+        c = ensure_commercial_classification(c)
+        aircraft_info = lookup_aircraft_info(c.aircraft.icao24)
+        out.append({
+            "index": i,
+            "distance_km": round(c.distance_km, 1),
+            "altitude_ft": round(c.aircraft.altitude_m * 3.28084),
+            "compass": c.compass,
+            "category_hint": c.category,
+            "aircraft_type": aircraft_info["type"],
+        })
+    return jsonify({"candidates": out})
+
+
+@app.route("/api/select", methods=["POST"])
+def api_select():
+    body = request.get_json() or {}
+    index = body.get("index")
     candidates = SESSION["candidates"]
-    if not candidates:
-        return jsonify({"found": False})
+    if index is None or not candidates or index < 0 or index >= len(candidates):
+        return jsonify({"found": False}), 400
 
-    idx = min(SESSION["index"], len(candidates) - 1)
-    c = core.refresh_candidate(candidates[idx], lat, lon, 0.0, now - SESSION["fetched_at"])
-    return jsonify({"found": True, **candidate_public_view(c)})
-
-
-@app.route("/api/skip", methods=["POST"])
-def api_skip():
-    SESSION["index"] += 1
-    candidates = SESSION["candidates"]
-    if not candidates or SESSION["index"] >= len(candidates):
-        return jsonify({"found": False})
+    SESSION["selected_index"] = index
+    seconds_elapsed = time.time() - SESSION["fetched_at"]
     c = core.refresh_candidate(
-        candidates[SESSION["index"]], SESSION["user_lat"], SESSION["user_lon"],
-        0.0, time.time() - SESSION["fetched_at"],
+        candidates[index], SESSION["user_lat"], SESSION["user_lon"], 0.0, seconds_elapsed
     )
     return jsonify({"found": True, **candidate_public_view(c)})
 
@@ -477,8 +510,8 @@ def api_reveal():
     lost_sight = body.get("lost_sight", False)
 
     candidates = SESSION["candidates"]
-    idx = min(SESSION["index"], len(candidates) - 1) if candidates else None
-    if idx is None:
+    idx = SESSION.get("selected_index")
+    if idx is None or not candidates or idx >= len(candidates):
         return jsonify({"error": "no active candidate"}), 400
 
     c = candidates[idx]
@@ -540,6 +573,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v11 (UK-biased geocoding + disambiguation) <<<")
+    print(">>> plane spotter backend: v14 (flight path coords) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
