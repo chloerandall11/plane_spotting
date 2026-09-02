@@ -113,10 +113,25 @@ def fetch_flight_trace(icao24):
         resp = requests.get(url, timeout=6)
         if resp.ok:
             trace = resp.json().get("trace") or []
-            points = []
-            for point in trace:
-                if len(point) >= 3 and point[1] is not None and point[2] is not None:
-                    points.append({"lat": point[1], "lon": point[2]})
+            # trace_full covers the WHOLE day for this airframe, often
+            # several separate flights stitched together. Walk backward
+            # from the most recent point and stop at the first big time
+            # gap or explicit position gap - that isolates just the
+            # current/most recent leg instead of mixing in old flights.
+            leg = []
+            prev_t = None
+            for point in reversed(trace):
+                t = point[0] if len(point) > 0 else None
+                lat = point[1] if len(point) > 1 else None
+                lon = point[2] if len(point) > 2 else None
+                if lat is None or lon is None:
+                    break  # explicit gap marker - previous leg starts here
+                if prev_t is not None and t is not None and (prev_t - t) > 1200:
+                    break  # >20 min gap - aircraft was grounded, different leg
+                leg.append({"lat": lat, "lon": lon})
+                prev_t = t
+            leg.reverse()
+            points = leg
             if len(points) > 60:  # downsample so the payload stays light
                 step = max(1, len(points) // 60)
                 points = points[::step]
@@ -602,6 +617,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v15 (real flight trace + map) <<<")
+    print(">>> plane spotter backend: v16 (fixed trace leg-filtering bug) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
