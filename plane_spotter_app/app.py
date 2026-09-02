@@ -99,6 +99,33 @@ def lookup_aircraft_info(icao24):
     return result
 
 
+def fetch_flight_trace(icao24):
+    """Best-effort: pulls this aircraft's actual recent flown path from
+    adsb.lol's globe-history trace data - the same data their own map
+    viewer uses for its 'replay' feature. This is NOT part of the
+    documented public API (no official endpoint for it), so it can
+    occasionally be unavailable or change without notice - the caller
+    should treat an empty list as normal, not an error."""
+    icao24 = icao24.lower()
+    bucket = icao24[-2:] if len(icao24) >= 2 else icao24
+    url = f"https://globe.adsb.lol/data/traces/{bucket}/trace_full_{icao24}.json"
+    try:
+        resp = requests.get(url, timeout=6)
+        if resp.ok:
+            trace = resp.json().get("trace") or []
+            points = []
+            for point in trace:
+                if len(point) >= 3 and point[1] is not None and point[2] is not None:
+                    points.append({"lat": point[1], "lon": point[2]})
+            if len(points) > 60:  # downsample so the payload stays light
+                step = max(1, len(points) // 60)
+                points = points[::step]
+            return points
+    except (requests.RequestException, ValueError, TypeError, KeyError) as e:
+        print(f"[trace] lookup failed for {icao24}: {e}")
+    return []
+
+
 def lookup_route(callsign):
     """Returns {'origin': str, 'destination': str, 'origin_coords': {...},
     'destination_coords': {...}} or None if unknown. Display strings are
@@ -290,6 +317,7 @@ def candidate_reveal_view(c: "core.Candidate"):
     heading_deg = round(c.aircraft.heading_deg) if c.aircraft.heading_deg is not None else None
     aircraft_info = lookup_aircraft_info(c.aircraft.icao24)
     route = lookup_route(c.aircraft.callsign) if c.category == "commercial" else None
+    trace_points = fetch_flight_trace(c.aircraft.icao24)
     return {
         "callsign": c.aircraft.callsign,
         "icao24": c.aircraft.icao24.upper(),
@@ -303,6 +331,7 @@ def candidate_reveal_view(c: "core.Candidate"):
         "origin_coords": route["origin_coords"] if route else None,
         "destination_coords": route["destination_coords"] if route else None,
         "current_coords": {"lat": c.aircraft.lat, "lon": c.aircraft.lon},
+        "trace_points": trace_points,
         "altitude_ft": round(c.aircraft.altitude_m * 3.28084),
         "distance_km": round(c.distance_km, 1),
         "speed_mph": speed_mph,
@@ -573,6 +602,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v14 (flight path coords) <<<")
+    print(">>> plane spotter backend: v15 (real flight trace + map) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
