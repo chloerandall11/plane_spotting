@@ -293,7 +293,7 @@ let compassActive = false;
 let referenceData = { airlines: [], airports: [] };
 let radiusKm = 15;
 let radiusDebounce = null;
-console.log('plane spotter frontend: v18 (distance in picker, plane icon, fixed 100km view)');
+console.log('plane spotter frontend: v19 (60km box, synthetic trail fallback)');
 
 fetch('/api/reference-data').then(r => r.json()).then(d => { referenceData = d; });
 
@@ -445,6 +445,18 @@ function planeDivIcon(headingDeg) {
   });
 }
 
+function destinationPoint(lat, lon, bearingDeg, distanceKm) {
+  const R = 6371;
+  const brng = bearingDeg * Math.PI / 180;
+  const lat1 = lat * Math.PI / 180, lon1 = lon * Math.PI / 180;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distanceKm / R) +
+    Math.cos(lat1) * Math.sin(distanceKm / R) * Math.cos(brng));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(brng) * Math.sin(distanceKm / R) * Math.cos(lat1),
+    Math.cos(distanceKm / R) - Math.sin(lat1) * Math.sin(lat2));
+  return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
 function initFlightMap(r) {
   // Called after the reveal card's HTML (including #flightMap div) is
   // already in the DOM - Leaflet needs a real element to attach to.
@@ -467,17 +479,31 @@ function initFlightMap(r) {
   }).addTo(map);
 
   const hasTrace = r.trace_points && r.trace_points.length >= 2;
+  const hasRouteLine = r.origin_coords && r.current_coords;
 
   if (hasTrace) {
     // The real flown path - what the aircraft has actually done.
     const latlngs = r.trace_points.map(p => [p.lat, p.lon]);
     L.polyline(latlngs, { color: '#5EFFA0', weight: 2.5, opacity: 0.8 }).addTo(map);
-  } else if (r.origin_coords && r.current_coords) {
+  } else if (hasRouteLine) {
     // No real trace available - approximate "where it's been" as a
     // line from its origin airport to its current position (never to
     // the destination, which hasn't happened yet).
     const line = [[r.origin_coords.lat, r.origin_coords.lon], [r.current_coords.lat, r.current_coords.lon]];
     L.polyline(line, { color: '#6B8F80', weight: 2, opacity: 0.7, dashArray: '5 6' }).addTo(map);
+  } else if (r.current_coords && r.heading_deg !== null && r.speed_mph) {
+    // Neither real trace nor a known route (common for military/private,
+    // or when the trace lookup didn't have data) - approximate a short
+    // recent trail by projecting backward from current position using
+    // its actual live speed and heading. Not real history, just a
+    // reasonable "roughly where it's just come from" estimate.
+    const speedKmh = r.speed_mph * 1.60934;
+    const minutesBack = 10;
+    const distanceKm = speedKmh * (minutesBack / 60);
+    const behindBearing = (r.heading_deg + 180) % 360;
+    const behindPoint = destinationPoint(r.current_coords.lat, r.current_coords.lon, behindBearing, distanceKm);
+    L.polyline([behindPoint, [r.current_coords.lat, r.current_coords.lon]],
+      { color: '#6B8F80', weight: 2, opacity: 0.6, dashArray: '2 6' }).addTo(map);
   }
 
   if (r.origin_coords) {
@@ -495,7 +521,7 @@ function initFlightMap(r) {
   // aircraft - so you can judge scale/distance consistently between
   // different flights, rather than the view auto-zooming per-flight.
   if (userLat !== null && userLon !== null) {
-    const halfKm = 50;
+    const halfKm = 30; // 60km x 60km box
     const latDelta = halfKm / 111;
     const lonDelta = halfKm / (111 * Math.cos(userLat * Math.PI / 180));
     map.fitBounds([

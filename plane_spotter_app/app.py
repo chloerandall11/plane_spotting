@@ -50,7 +50,9 @@ SESSION = {
     "radius_km": core.SEARCH_RADIUS_KM,
 }
 
-MAX_CANDIDATES_LISTED = 12
+MAX_CANDIDATES_LISTED = 25  # raised from 12 - busy airspace (e.g. near a major
+# airport) easily has more than 12 aircraft at once; higher = more complete
+# picker list, at the cost of a few more aircraft-type lookups per scan
 
 CASUAL_COMMENTS = {
     "correct": [
@@ -617,6 +619,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v16 (fixed trace leg-filtering bug) <<<")
+    print(">>> plane spotter backend: v17 (raised candidate cap 12->25) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))
