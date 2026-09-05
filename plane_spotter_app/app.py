@@ -619,6 +619,6 @@ def api_delete_history_entry(entry_id):
 
 
 if __name__ == "__main__":
-    print(">>> plane spotter backend: v17 (raised candidate cap 12->25) <<<")
+    print(">>> plane spotter backend: v18 (relaxed elevation filter 15deg->3deg) <<<")
     port = int(os.environ.get("PORT", 5050))
     app.run(host="0.0.0.0", port=port, debug=(port == 5050))

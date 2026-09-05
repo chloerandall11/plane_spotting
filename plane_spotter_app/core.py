@@ -19,7 +19,14 @@ import requests
 
 # Minimum elevation angle (degrees above horizon) to bother suggesting
 # a plane - anything lower is hard to spot and easy to lose in clutter.
-MIN_ELEVATION_DEG = 15.0
+# Minimum elevation angle (degrees above horizon) to bother suggesting
+# a plane. Kept low (not a strict "overhead" threshold) because at
+# typical cruise altitude (30-40,000ft), even a fairly high angle like
+# 15 degrees only "clears" within a few km - anything further away and
+# realistically visible in the sky gets excluded. 3 degrees still
+# excludes things right on the horizon (likely blocked by buildings/
+# terrain) while keeping most of what you'd actually see looking up.
+MIN_ELEVATION_DEG = 3.0
 
 # How far out to even consider aircraft, in km. Kept tight so results
 # are things you can plausibly make out with the naked eye.
