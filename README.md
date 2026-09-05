@@ -2,6 +2,11 @@
 
 **Live app:** [plane-spotting.onrender.com](https://plane-spotting.onrender.com)
 
+> Built with [Claude](https://claude.com) (Anthropic) — I designed and
+> directed the app, and worked with Claude to write the code, debug
+> issues, and figure out the free APIs/hosting to use. Flagging this
+> upfront since it's how the whole thing came together.
+
 A personal game: it tells you roughly where to look in the sky for the
 nearest plane — with a live compass arrow that lights up once you're
 actually facing it — you guess the airline, aircraft type, and route
